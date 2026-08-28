@@ -1,0 +1,71 @@
+# GD2 local stack: Postgres + Redis + Backend (NestJS) + Indexer.
+# Contracts are NOT part of this compose file - run `npx hardhat node` and
+# `npx hardhat run scripts/deploy.ts --network localhost` separately in contracts/,
+# then fill in VAULT_ADDRESS / STRATEGY_MANAGER_ADDRESS below before `docker compose up`.
+name: yield-vault
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: yield_vault
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  indexer:
+    build:
+      context: .
+      dockerfile: indexer/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      RPC_URL: ${RPC_URL:-http://host.docker.internal:8545}
+      CHAIN_ID: ${CHAIN_ID:-31337}
+      POSTGRES_URL: postgres://postgres:postgres@postgres:5432/yield_vault
+      VAULT_ADDRESS: ${VAULT_ADDRESS}
+      STRATEGY_MANAGER_ADDRESS: ${STRATEGY_MANAGER_ADDRESS}
+      CONFIRMATIONS: ${CONFIRMATIONS:-3}
+      POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-2000}
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      POSTGRES_URL: postgres://postgres:postgres@postgres:5432/yield_vault
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "3001:3001"
+
+volumes:
+  postgres-data:

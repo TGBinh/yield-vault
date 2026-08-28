@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/.next
+**/.git
+contracts/artifacts
+contracts/cache
+contracts/typechain-types
+**/.env
+*.log

@@ -1,0 +1,7 @@
+{
+  "solidity.compileUsingRemoteVersion": "v0.8.26",
+  "solidity.defaultCompiler": "remote",
+  "solidity.evmVersion": "cancun",
+  "solidity.monoRepoSupport": true,
+  "solidity.packageDefaultDependenciesDirectory": "node_modules"
+}

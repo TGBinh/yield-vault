@@ -1,0 +1,41 @@
+node_modules/
+.env
+.env.local
+dist/
+*.log
+
+# Next.js
+.next/
+
+# Foundry / Solidity build output
+out/
+cache_forge/
+lib/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Hardhat local node log
+hardhat-node.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+
+# Claude Code / agent tooling internal state - not project content
+.omc/
+*.stackdump
+
+# Unrelated leftover file from an earlier, different experiment in this folder
+/flowpay-roadmap.html
+
+# Design/planning docs for local reading only - not published to the repo (README.md
+# files are kept - only these specific internal docs are excluded)
+/PLAN.md
+/v0-prompt.md
