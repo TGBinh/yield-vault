@@ -142,10 +142,14 @@ contract StrategyManager is IStrategyManager, AccessControl {
     /// lượt từng strategy active (waterfall theo thứ tự đăng ký) - strategy nào lỗi
     /// (revert khi gọi `totalAssets()`/`withdraw()`) bị bỏ qua, không làm hỏng cả giao
     /// dịch. Chỉ revert nếu tổng rút được từ mọi nguồn vẫn không đủ `amount`.
-    /// @dev Slither báo reentrancy-balance ("remaining có thể stale sau external call") -
-    /// đây là false positive: `remaining` chỉ được đọc/ghi trong đúng vòng lặp waterfall
-    /// này, cập nhật tuần tự sau mỗi lần rút thành công, không có state nào khác đọc
-    /// biến local này từ bên ngoài để bị lợi dụng.
+    /// @dev Slither báo reentrancy-balance (HIGH) - "remaining có thể stale sau external
+    /// call". Đánh giá kỹ: đây là false positive thật, không chỉ nhận định chủ quan -
+    /// `remaining` là biến local, không phải state; kịch bản tấn công duy nhất khả dĩ là
+    /// `to` (contract độc hại) reentrant khi nhận token, nhưng hàm này chỉ gọi được qua
+    /// `onlyVault`, và MỌI entrypoint public của Vault (`deposit`/`withdraw`/`redeem`) đã
+    /// có `nonReentrant` riêng - reentry qua đường hợp lệ duy nhất đã bị chặn từ tầng
+    /// Vault trước khi tới được đây. Suppress có chủ đích, không phải bỏ qua cảnh báo.
+    // slither-disable-next-line reentrancy-balance
     function withdraw(uint256 amount, address to) external onlyVault {
         uint256 remaining = amount;
 
