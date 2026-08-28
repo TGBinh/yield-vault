@@ -21,6 +21,17 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
       - name: Install dependencies
         run: npm install
+      # forge-std is intentionally gitignored (contracts/.gitignore) - it was installed
+      # locally by downloading the zip directly (git submodules don't work here, see
+      # PLAN.md GD3: contracts/ is nested inside an unrelated parent git history) - CI
+      # needs the same restore step since it's not in the checked-out tree.
+      - name: Restore forge-std
+        working-directory: contracts
+        run: |
+          mkdir -p lib
+          curl -sL -o /tmp/forge-std.zip https://github.com/foundry-rs/forge-std/archive/refs/heads/master.zip
+          unzip -q /tmp/forge-std.zip -d /tmp
+          mv /tmp/forge-std-master lib/forge-std
       - name: Hardhat compile
         working-directory: contracts
         run: npx hardhat compile
@@ -45,6 +56,13 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
       - name: Install dependencies
         run: npm install
+      - name: Restore forge-std
+        working-directory: contracts
+        run: |
+          mkdir -p lib
+          curl -sL -o /tmp/forge-std.zip https://github.com/foundry-rs/forge-std/archive/refs/heads/master.zip
+          unzip -q /tmp/forge-std.zip -d /tmp
+          mv /tmp/forge-std-master lib/forge-std
       - name: Foundry fork tests (Aave + Morpho)
         working-directory: contracts
         run: forge test --match-contract "AaveStrategyForkTest|MorphoStrategyForkTest" -v
@@ -64,7 +82,10 @@ jobs:
       - name: Install dependencies
         run: npm install
       - name: Install Slither
-        run: pip install slither-analyzer
+        # Pinned to the exact version verified locally (--exclude-dependencies --fail-high
+        # confirmed exit 0 on this codebase) - an unpinned install can silently pick up a
+        # newer release with different exit-code behavior for these flags.
+        run: pip install slither-analyzer==0.11.6
       - name: Run Slither (own code only - dependencies excluded)
         working-directory: contracts
         run: slither . --exclude-dependencies --fail-high

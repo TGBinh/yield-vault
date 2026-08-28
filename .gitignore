@@ -7,10 +7,12 @@ dist/
 # Next.js
 .next/
 
-# Foundry / Solidity build output
-out/
-cache_forge/
-lib/
+# Foundry / Solidity build output - scoped to contracts/ specifically; a bare "lib/"
+# or "out/" pattern would also match frontend/src/lib, contracts/scripts/lib, etc.
+# (this exact bug once silently excluded those from git - do not undo the anchoring).
+/contracts/out/
+/contracts/cache_forge/
+/contracts/lib/
 
 # Python
 .venv/
@@ -30,6 +32,7 @@ Thumbs.db
 
 # Claude Code / agent tooling internal state - not project content
 .omc/
+.claude/
 *.stackdump
 
 # Unrelated leftover file from an earlier, different experiment in this folder

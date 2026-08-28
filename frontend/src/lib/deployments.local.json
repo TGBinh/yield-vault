@@ -1,0 +1,12 @@
+{
+  "chainId": 31337,
+  "network": "hardhat-localhost",
+  "rpcUrl": "http://127.0.0.1:8545",
+  "contracts": {
+    "usdc": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    "vault": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+    "strategyManager": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+    "strategy": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9"
+  },
+  "note": "Địa chỉ này chỉ đúng khi node local (npx hardhat node) chưa bị restart. Nếu restart node, chạy lại `npx hardhat run scripts/deploy.ts --network localhost` trong contracts/ rồi cập nhật file này. Từ Giai đoạn 2, Vault không còn `strategy`/`setStrategy` trực tiếp - đã đổi thành `strategyManager`/`setStrategyManager`, ABI Vault.json cũng đã được copy lại."
+}

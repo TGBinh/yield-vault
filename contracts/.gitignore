@@ -7,6 +7,6 @@ coverage
 coverage.json
 typechain
 typechain-types
-out
-cache_forge
-lib
+/out
+/cache_forge
+/lib
