@@ -180,17 +180,23 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Docker/OCI image tags must be all-lowercase, but `github.repository` preserves
+      # the actual account casing (e.g. "TGBinh/yield-vault") - lowercase it explicitly
+      # rather than assuming the repo owner name happens to already be lowercase.
+      - name: Compute lowercase image name
+        id: image
+        run: echo "repo=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
       - name: Push indexer image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: indexer/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository }}-indexer:staging
+          tags: ghcr.io/${{ steps.image.outputs.repo }}-indexer:staging
       - name: Push backend image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: backend/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository }}-backend:staging
+          tags: ghcr.io/${{ steps.image.outputs.repo }}-backend:staging
