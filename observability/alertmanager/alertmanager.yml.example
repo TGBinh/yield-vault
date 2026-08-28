@@ -1,0 +1,19 @@
+# Copy this file to alertmanager.yml (gitignored) and replace the URL below with your
+# real Discord or Telegram webhook before running docker compose up. Both accept a plain
+# HTTP POST webhook, so this generic `webhook_configs` receiver works for either.
+#
+# PLAN.md §7: "Alerts... Discord/Telegram webhook cho alert" - wiring is complete, but
+# activating it requires a real webhook URL from whoever runs this stack (not something
+# that can be pre-filled here).
+route:
+  receiver: default
+  group_by: ["alertname"]
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: "https://replace-me-with-your-real-webhook-url.example.com"
+        send_resolved: true

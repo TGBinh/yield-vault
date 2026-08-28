@@ -1,0 +1,64 @@
+groups:
+  - name: yield-vault-indexer
+    rules:
+      - alert: IndexerBlockLagHigh
+        # PLAN.md §7: "indexer ngừng tiến (block lag)". Threshold is generous for a
+        # local/testnet poll-based indexer (2s poll interval) - tune down for a faster
+        # chain or a tighter SLA.
+        expr: yield_vault_indexer_block_lag > 50
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Indexer is falling behind the chain head"
+          description: "Block lag is {{ $value }} blocks for more than 2 minutes - RPC may be slow/down, or the poll loop is stuck."
+
+      - alert: IndexerRpcErrorsSpike
+        expr: increase(yield_vault_indexer_rpc_errors_total[5m]) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "Indexer RPC errors spiking"
+          description: "More than 5 RPC errors in the last 5 minutes - check RPC provider health."
+
+      - alert: IndexerReorgDetected
+        expr: increase(yield_vault_indexer_reorgs_detected_total[5m]) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: "Chain reorg orphaned an indexed row"
+          description: "The indexer had to delete a previously-seen row because its transaction disappeared from the chain (reorg)."
+
+  - name: yield-vault-backend
+    rules:
+      - alert: BackendDown
+        expr: up{job="yield-vault-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend API is unreachable"
+          description: "Prometheus has not been able to scrape the backend for over 1 minute."
+
+      - alert: VaultTvlDroppedSharply
+        # PLAN.md §7: "rút tiền lớn bất thường (>X% TVL trong 1 tx)" - approximated here
+        # as a sharp TVL drop over a short window, since we don't have a native
+        # "% of TVL in one tx" metric yet. Revisit with a tighter, per-tx check once the
+        # Risk Engine (GD3) or a dedicated backend metric can compute that directly.
+        expr: (yield_vault_tvl_base_units offset 5m) > 0 and (yield_vault_tvl_base_units / (yield_vault_tvl_base_units offset 5m)) < 0.5
+        labels:
+          severity: warning
+        annotations:
+          summary: "Vault TVL dropped by more than 50% in 5 minutes"
+          description: "Current TVL is {{ $value | humanizePercentage }} of what it was 5 minutes ago - verify this is expected before assuming it's benign."
+
+  - name: yield-vault-indexer-liveness
+    rules:
+      - alert: IndexerDown
+        expr: up{job="yield-vault-indexer"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Indexer is unreachable"
+          description: "Prometheus has not been able to scrape the indexer for over 1 minute - no new on-chain events are being recorded."

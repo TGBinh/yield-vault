@@ -1,0 +1,96 @@
+{
+  "title": "Yield Vault",
+  "uid": "yield-vault-overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Vault TVL (base units)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [{ "expr": "yield_vault_tvl_base_units", "legendFormat": "TVL" }]
+    },
+    {
+      "id": 2,
+      "title": "Total Shares",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [{ "expr": "yield_vault_total_shares", "legendFormat": "Shares" }]
+    },
+    {
+      "id": 3,
+      "title": "Deposits / Withdrawals (count)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "yield_vault_deposit_count", "legendFormat": "Deposits" },
+        { "expr": "yield_vault_withdrawal_count", "legendFormat": "Withdrawals" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Backend HTTP Request Duration (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(yield_vault_backend_http_request_duration_seconds_bucket[5m])) by (le, route))",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Indexer Block Lag",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": "Prometheus",
+      "targets": [{ "expr": "yield_vault_indexer_block_lag", "legendFormat": "Block lag" }]
+    },
+    {
+      "id": 6,
+      "title": "Indexer Events Processed (rate/5m)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(yield_vault_indexer_events_processed_total[5m])) by (contract, event_name)",
+          "legendFormat": "{{contract}}/{{event_name}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Indexer RPC Errors (rate/5m)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": "Prometheus",
+      "targets": [{ "expr": "rate(yield_vault_indexer_rpc_errors_total[5m])", "legendFormat": "RPC errors" }]
+    },
+    {
+      "id": 8,
+      "title": "Service Liveness",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": "Prometheus",
+      "targets": [{ "expr": "up{job=~\"yield-vault-.*\"}", "legendFormat": "{{job}}" }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" } } },
+            { "type": "value", "options": { "1": { "text": "UP", "color": "green" } } }
+          ]
+        }
+      }
+    }
+  ]
+}

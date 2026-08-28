@@ -24,6 +24,10 @@ __pycache__/
 # Hardhat local node log
 hardhat-node.log
 
+# Real Alertmanager config (contains a real webhook URL once configured) - copy from
+# alertmanager.yml.example and edit locally, never commit the real one.
+/observability/alertmanager/alertmanager.yml
+
 # OS / editor
 .DS_Store
 Thumbs.db

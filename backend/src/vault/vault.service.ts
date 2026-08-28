@@ -4,6 +4,7 @@ import type Redis from 'ioredis';
 import { PG_POOL } from '../database/database.constants';
 import { REDIS_CLIENT } from '../redis/redis.constants';
 import { VaultSummaryDto } from './dto/vault-summary.dto';
+import { MetricsService } from '../metrics/metrics.service';
 
 const VAULT_SUMMARY_CACHE_KEY = 'vault:summary';
 const VAULT_SUMMARY_CACHE_TTL_SECONDS = 15;
@@ -25,6 +26,7 @@ export class VaultService {
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly metrics: MetricsService,
   ) {}
 
   async getSummary(): Promise<VaultSummaryDto> {
@@ -82,14 +84,26 @@ export class VaultService {
         ? ((tvl * 10n ** 18n) / totalShares).toString()
         : null;
 
+    const depositCount = Number(depositResult.rows[0]?.deposit_count ?? 0);
+    const withdrawalCount = Number(
+      withdrawalResult.rows[0]?.withdrawal_count ?? 0,
+    );
+
+    // Push straight from here (not a separate polling loop in MetricsService) - this is
+    // the one place that already computes these values, no reason for a second query path.
+    this.metrics.vaultTvl.set(Number(tvl));
+    this.metrics.vaultTotalShares.set(Number(totalShares));
+    this.metrics.vaultDepositCount.set(depositCount);
+    this.metrics.vaultWithdrawalCount.set(withdrawalCount);
+
     return {
       totalDeposited: totalDeposited.toString(),
       totalWithdrawn: totalWithdrawn.toString(),
       tvl: tvl.toString(),
       totalShares: totalShares.toString(),
       sharePrice,
-      depositCount: Number(depositResult.rows[0]?.deposit_count ?? 0),
-      withdrawalCount: Number(withdrawalResult.rows[0]?.withdrawal_count ?? 0),
+      depositCount,
+      withdrawalCount,
     };
   }
 }

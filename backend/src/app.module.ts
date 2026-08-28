@@ -5,6 +5,7 @@ import { RedisModule } from './redis/redis.module';
 import { VaultModule } from './vault/vault.module';
 import { UserModule } from './user/user.module';
 import { StrategiesModule } from './strategies/strategies.module';
+import { MetricsModule } from './metrics/metrics.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { StrategiesModule } from './strategies/strategies.module';
     }),
     DatabaseModule,
     RedisModule,
+    MetricsModule,
     VaultModule,
     UserModule,
     StrategiesModule,

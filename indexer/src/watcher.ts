@@ -3,6 +3,13 @@ import { config } from "./config";
 import { pool } from "./db/client";
 import vaultAbiJson from "./abis/Vault.json";
 import strategyManagerAbiJson from "./abis/StrategyManager.json";
+import {
+  blockLag,
+  currentBlock as currentBlockGauge,
+  eventsProcessedTotal,
+  reorgsDetectedTotal,
+  rpcErrorsTotal,
+} from "./metrics";
 
 const vaultAbi = vaultAbiJson as readonly unknown[];
 const strategyManagerAbi = strategyManagerAbiJson as readonly unknown[];
@@ -66,6 +73,7 @@ export class Watcher {
     if (this.stopped) return;
     this.timer = setTimeout(() => {
       this.tick().catch((err) => {
+        rpcErrorsTotal.inc();
         console.error(JSON.stringify({ level: "error", msg: "Watcher tick failed", error: String(err) }));
         this.scheduleNextTick();
       });
@@ -77,10 +85,15 @@ export class Watcher {
     this.blockTimestampCache.clear();
 
     const currentBlock = await this.client.getBlockNumber();
+    currentBlockGauge.set(Number(currentBlock));
 
+    let maxLag = 0n;
     for (const contract of watchedContracts) {
+      const cursorBefore = await this.getCursor(contract.address, currentBlock);
+      maxLag = maxLag > currentBlock - cursorBefore ? maxLag : currentBlock - cursorBefore;
       await this.scanContract(contract, currentBlock);
     }
+    blockLag.set(Number(maxLag));
 
     await this.confirmPendingRows(currentBlock);
 
@@ -183,6 +196,7 @@ export class Watcher {
           args.shares.toString(),
         ],
       );
+      eventsProcessedTotal.inc({ contract: contract.name, event_name: decoded.eventName });
       return;
     }
 
@@ -213,6 +227,7 @@ export class Watcher {
           args.shares.toString(),
         ],
       );
+      eventsProcessedTotal.inc({ contract: contract.name, event_name: decoded.eventName });
       return;
     }
 
@@ -234,6 +249,7 @@ export class Watcher {
           JSON.stringify(payload),
         ],
       );
+      eventsProcessedTotal.inc({ contract: contract.name, event_name: decoded.eventName });
     }
   }
 
@@ -258,6 +274,7 @@ export class Watcher {
         if (stillOnChain) {
           await pool.query(`UPDATE ${table} SET confirmed = TRUE WHERE id = $1`, [row.id]);
         } else {
+          reorgsDetectedTotal.inc();
           console.warn(
             JSON.stringify({
               level: "warn",

@@ -17,6 +17,7 @@ const envSchema = z.object({
     .regex(/^0x[a-fA-F0-9]{40}$/, "STRATEGY_MANAGER_ADDRESS must be a valid 0x-prefixed address"),
   CONFIRMATIONS: z.coerce.number().int().nonnegative().default(3),
   POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
+  METRICS_PORT: z.coerce.number().int().positive().default(9464),
 });
 
 type Env = z.infer<typeof envSchema>;
@@ -42,6 +43,7 @@ export const config = {
   strategyManagerAddress: env.STRATEGY_MANAGER_ADDRESS as `0x${string}`,
   confirmations: env.CONFIRMATIONS,
   pollIntervalMs: env.POLL_INTERVAL_MS,
+  metricsPort: env.METRICS_PORT,
 };
 
 export type Config = typeof config;

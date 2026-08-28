@@ -49,6 +49,9 @@ services:
       STRATEGY_MANAGER_ADDRESS: ${STRATEGY_MANAGER_ADDRESS}
       CONFIRMATIONS: ${CONFIRMATIONS:-3}
       POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-2000}
+      METRICS_PORT: 9464
+    ports:
+      - "9464:9464"
 
   backend:
     build:
@@ -67,5 +70,49 @@ services:
     ports:
       - "3001:3001"
 
+  # --- Observability (PLAN.md GD3 §7) ---
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - backend
+      - indexer
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    # alertmanager.yml is gitignored (copy alertmanager.yml.example and put your real
+    # Discord/Telegram webhook URL in it - see the example file for details). Falls back
+    # to a placeholder URL that just won't deliver anywhere until you do that.
+    volumes:
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3002:3000"
+    depends_on:
+      - prometheus
+
 volumes:
   postgres-data:
+  prometheus-data:
+  grafana-data:

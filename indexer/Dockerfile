@@ -21,4 +21,5 @@ COPY --from=build /app/indexer/node_modules indexer/node_modules
 COPY --from=build /app/indexer/dist indexer/dist
 COPY --from=build /app/indexer/package.json indexer/package.json
 WORKDIR /app/indexer
+EXPOSE 9464
 CMD ["node", "dist/index.js"]
