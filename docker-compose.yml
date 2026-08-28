@@ -53,6 +53,22 @@ services:
     ports:
       - "9464:9464"
 
+  risk-engine:
+    build:
+      context: risk-engine
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+
+  ai-engine:
+    build:
+      context: ai-engine
+    restart: unless-stopped
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports:
+      - "8001:8001"
+
   backend:
     build:
       context: .
@@ -63,10 +79,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      risk-engine:
+        condition: service_started
+      ai-engine:
+        condition: service_started
     environment:
       PORT: 3001
       POSTGRES_URL: postgres://postgres:postgres@postgres:5432/yield_vault
       REDIS_URL: redis://redis:6379
+      RISK_ENGINE_URL: http://risk-engine:8002
+      AI_ENGINE_URL: http://ai-engine:8001
     ports:
       - "3001:3001"
 

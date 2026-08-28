@@ -7,6 +7,7 @@ import { FaucetButton } from "@/components/faucet-button";
 import { DepositForm } from "@/components/deposit-form";
 import { WithdrawForm } from "@/components/withdraw-form";
 import { TransactionHistory } from "@/components/transaction-history";
+import { AiRecommendation } from "@/components/ai-recommendation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useVaultData } from "@/hooks/use-vault-data";
@@ -118,7 +119,10 @@ export function VaultDashboard() {
         </Card>
       </div>
 
-      <TransactionHistory usdcDecimals={usdcDecimals} />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <TransactionHistory usdcDecimals={usdcDecimals} />
+        <AiRecommendation />
+      </div>
     </div>
   );
 }

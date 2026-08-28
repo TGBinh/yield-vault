@@ -1,24 +1,25 @@
 [project]
-name = "risk-engine"
+name = "ai-engine"
 version = "0.1.0"
-description = "Deterministic risk scoring + allocation optimization for the AI-Powered Cross-Chain Yield Vault (Phase 3, no ML/LLM - see PLAN.md)."
+description = "AI Engine (Phase 4) - LLM-generated allocation recommendations with structured output. Never has execution authority; every output goes through the Backend's Policy Engine before anything can be approved. See PLAN.md GD4."
 requires-python = ">=3.10"
 dependencies = [
-    "requests>=2.31",
-    "web3>=6.15",
-    "pydantic>=2.6",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
+    "pydantic>=2.6",
+    "anthropic>=0.40",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
-    "responses>=0.25",
+    "pytest-asyncio>=0.24",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -47,3 +47,48 @@ export function fetchVaultSummary(): Promise<VaultSummary> {
 export function fetchUserPositions(address: string): Promise<UserPositions> {
   return fetchJson<UserPositions>(`/user/${address}/positions`);
 }
+
+export type AllocationSuggestion = {
+  strategyId: string;
+  targetWeightBps: number;
+  riskScore: number;
+  expectedApy: number;
+};
+
+export type Recommendation = {
+  allocations: AllocationSuggestion[];
+  source: "ai" | "deterministic";
+  confidence: number;
+  explanation: string;
+  riskFlags: string[];
+};
+
+export type PolicyVerdict = {
+  approved: boolean;
+  reason: string;
+  executionIntent: {
+    allocations: { strategyId: string; targetWeightBps: number }[];
+    approvedAt: string;
+    expiresAt: string;
+  } | null;
+};
+
+export type RecommendationPipelineResult = {
+  optimizationResult: {
+    allocations: {
+      strategy_id: string;
+      target_weight_bps: number;
+      risk_score: number;
+      expected_apy: number;
+      rationale: string;
+    }[];
+    total_weight_bps: number;
+    generated_at: string;
+  };
+  recommendation: Recommendation;
+  policyVerdict: PolicyVerdict;
+};
+
+export function fetchLatestRecommendation(): Promise<RecommendationPipelineResult> {
+  return fetchJson<RecommendationPipelineResult>("/recommendations/latest");
+}
