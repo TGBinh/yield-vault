@@ -7,11 +7,13 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from risk_engine.cross_chain import ChainOpportunity, SwitchCostEstimate, SwitchRecommendation, evaluate_switch
 from risk_engine.main import run
+from pydantic import BaseModel
 
 app = FastAPI(
     title="Yield Vault Risk & Optimization Engine",
-    description="Deterministic (no AI/LLM) risk scoring + allocation optimization - see PLAN.md GD3.",
+    description="Deterministic (no AI/LLM) risk scoring + allocation optimization - see PLAN.md GD3/GD5.",
 )
 
 
@@ -23,3 +25,19 @@ def health() -> dict:
 @app.get("/optimize")
 def optimize() -> dict:
     return run()
+
+
+class CrossChainEvaluateRequest(BaseModel):
+    current: ChainOpportunity
+    candidate: ChainOpportunity
+    position_size_usd: float
+    costs: SwitchCostEstimate
+
+
+@app.post("/cross-chain/evaluate", response_model=SwitchRecommendation)
+def cross_chain_evaluate(request: CrossChainEvaluateRequest) -> SwitchRecommendation:
+    """PLAN.md GD5 §4/§6: 'nên/không nên chuyển sang chain X' kèm số liệu chi phí-lợi ích -
+    display-only recommendation, no cross-chain execution happens here or anywhere yet."""
+    return evaluate_switch(
+        request.current, request.candidate, request.position_size_usd, request.costs
+    )

@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 import type Redis from 'ioredis';
 import { PG_POOL } from '../database/database.constants';
 import { REDIS_CLIENT } from '../redis/redis.constants';
-import { VaultSummaryDto } from './dto/vault-summary.dto';
+import { ChainVaultSummaryDto, VaultSummaryDto } from './dto/vault-summary.dto';
 import { MetricsService } from '../metrics/metrics.service';
 
 const VAULT_SUMMARY_CACHE_KEY = 'vault:summary';
@@ -18,6 +18,16 @@ interface DepositAggregateRow {
 interface WithdrawalAggregateRow {
   total_assets: string | null;
   total_shares: string | null;
+  withdrawal_count: string;
+}
+
+interface ChainAggregateRow {
+  chain_id: number;
+  deposit_assets: string | null;
+  deposit_shares: string | null;
+  deposit_count: string;
+  withdrawal_assets: string | null;
+  withdrawal_shares: string | null;
   withdrawal_count: string;
 }
 
@@ -105,5 +115,44 @@ export class VaultService {
       depositCount,
       withdrawalCount,
     };
+  }
+
+  /// Phase 5 (GD5): TVL theo TỪNG chain riêng biệt - phục vụ dashboard "≥2 chain đồng
+  /// thời" (PLAN.md GD5 §6). FULL OUTER JOIN vì 1 chain có thể chỉ có deposit chưa có
+  /// withdraw nào (hoặc ngược lại) - INNER JOIN sẽ bỏ sót chain đó.
+  async getSummaryByChain(): Promise<ChainVaultSummaryDto[]> {
+    const result = await this.pool.query<ChainAggregateRow>(
+      `WITH deposit_agg AS (
+         SELECT chain_id, SUM(assets) AS deposit_assets, SUM(shares) AS deposit_shares, COUNT(*) AS deposit_count
+         FROM deposits WHERE confirmed = true GROUP BY chain_id
+       ),
+       withdrawal_agg AS (
+         SELECT chain_id, SUM(assets) AS withdrawal_assets, SUM(shares) AS withdrawal_shares, COUNT(*) AS withdrawal_count
+         FROM withdrawals WHERE confirmed = true GROUP BY chain_id
+       )
+       SELECT
+         COALESCE(d.chain_id, w.chain_id) AS chain_id,
+         COALESCE(d.deposit_assets, 0)::text AS deposit_assets,
+         COALESCE(d.deposit_shares, 0)::text AS deposit_shares,
+         COALESCE(d.deposit_count, 0)::text AS deposit_count,
+         COALESCE(w.withdrawal_assets, 0)::text AS withdrawal_assets,
+         COALESCE(w.withdrawal_shares, 0)::text AS withdrawal_shares,
+         COALESCE(w.withdrawal_count, 0)::text AS withdrawal_count
+       FROM deposit_agg d
+       FULL OUTER JOIN withdrawal_agg w ON d.chain_id = w.chain_id
+       ORDER BY chain_id`,
+    );
+
+    return result.rows.map((row) => {
+      const tvl = BigInt(row.deposit_assets ?? '0') - BigInt(row.withdrawal_assets ?? '0');
+      const totalShares = BigInt(row.deposit_shares ?? '0') - BigInt(row.withdrawal_shares ?? '0');
+      return {
+        chainId: row.chain_id,
+        tvl: tvl.toString(),
+        totalShares: totalShares.toString(),
+        depositCount: Number(row.deposit_count),
+        withdrawalCount: Number(row.withdrawal_count),
+      };
+    });
   }
 }
