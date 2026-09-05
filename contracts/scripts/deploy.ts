@@ -88,6 +88,33 @@ async function main() {
   await (await strategyManager.revokeRole(executorRole, deployer.address)).wait();
   console.log("EXECUTOR_ROLE transferred to RebalanceTimelock and revoked from deployer.");
 
+  // Vault Readiness Report - Phase 0: GUARDIAN_ROLE (pause khẩn cấp) phải nằm ở những
+  // địa chỉ CÓ THỂ HÀNH ĐỘNG MỘT MÌNH, NGAY LẬP TỨC - tách hẳn khỏi
+  // GOVERNANCE_MULTISIG_ADDRESS (Safe 2-of-3) vốn cần thu thập đủ chữ ký mới thực thi
+  // được. Cấp thêm (KHÔNG thay thế) - admin bootstrap vẫn giữ GUARDIAN_ROLE cho tới khi
+  // owner transfer sang Safe (xem SafeGovernance.test.ts), nhưng mọi guardian ca nhan
+  // trong GUARDIAN_ADDRESSES co the pause() ngay, khong can cho Safe gom du chu ky.
+  // GUARDIAN_ADDRESSES: danh sach dia chi phan cach boi dau phay, vi du 3 thanh vien
+  // team giu 3 private key rieng biet (KHONG phai la 1 multisig contract - neu la
+  // multisig thi lai quay lai dung van de bao cao chi ra: phai gom chu ky moi pause
+  // duoc).
+  const guardianAddresses = (process.env.GUARDIAN_ADDRESSES ?? "")
+    .split(",")
+    .map((a) => a.trim())
+    .filter((a) => a.length > 0);
+
+  if (guardianAddresses.length > 0) {
+    const guardianRole = await vault.GUARDIAN_ROLE();
+    for (const guardian of guardianAddresses) {
+      await (await vault.grantRole(guardianRole, guardian)).wait();
+      console.log("GUARDIAN_ROLE granted to individual guardian:", guardian);
+    }
+  } else {
+    console.log(
+      "GUARDIAN_ADDRESSES not set - only the bootstrap admin can pause() for now (dev/local only)."
+    );
+  }
+
   console.log("\n--- Deploy done ---");
   console.log(JSON.stringify({
     usdc: await usdc.getAddress(),

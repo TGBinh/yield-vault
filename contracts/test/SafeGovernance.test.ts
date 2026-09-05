@@ -13,7 +13,7 @@ const ONE_USDC = 10n ** 6n;
 /// - Giao dịch có đủ chữ ký (đạt threshold) qua Safe THẬT thực thi được.
 describe("Safe multisig governance (Phase 3)", () => {
   async function deployWithSafeFixture() {
-    const [deployer, ownerB, ownerC, alice] = await ethers.getSigners();
+    const [deployer, ownerB, ownerC, alice, guardian1, guardian2] = await ethers.getSigners();
 
     const MockUSDCFactory = await ethers.getContractFactory("MockUSDC");
     const usdc = (await MockUSDCFactory.deploy()) as unknown as MockUSDC;
@@ -80,6 +80,14 @@ describe("Safe multisig governance (Phase 3)", () => {
     await strategyManager.grantRole(defaultAdminRole, safeAddress);
     await strategyManager.grantRole(strategistRole, safeAddress);
 
+    // Vault Readiness Report - Phase 0: GUARDIAN_ROLE cũng được cấp CHO TỪNG CÁ NHÂN
+    // guardian1/guardian2 - hai địa chỉ KHÔNG nằm trong bộ 3 owner của Safe. Đây chính là
+    // điểm mấu chốt cần rà soát: pause() khẩn cấp không được phép phụ thuộc vào quy trình
+    // đa chữ ký chậm của Safe - bất kỳ 1 guardian cá nhân nào cũng phải pause được MỘT
+    // MÌNH, ngay lập tức, không cần gom đủ chữ ký.
+    await vault.grantRole(guardianRole, guardian1.address);
+    await vault.grantRole(guardianRole, guardian2.address);
+
     // EXECUTOR_ROLE chỉ thuộc về Timelock - KHÔNG được cấp cho Safe, vì Safe có quyền
     // execute trực tiếp thì Timelock vô nghĩa (đây chính là bug đã tìm thấy khi viết lại
     // test này: EXECUTOR_ROLE quên revoke khỏi deployer sẽ để lộ y hệt lỗ hổng ban đầu).
@@ -94,7 +102,21 @@ describe("Safe multisig governance (Phase 3)", () => {
     await usdc.mint(alice.address, 1_000_000n * ONE_USDC);
     await usdc.connect(alice).approve(await vault.getAddress(), ethers.MaxUint256);
 
-    return { deployer, ownerB, ownerC, alice, usdc, vault, strategyManager, strategyA, strategyB, safe, timelock };
+    return {
+      deployer,
+      ownerB,
+      ownerC,
+      alice,
+      guardian1,
+      guardian2,
+      usdc,
+      vault,
+      strategyManager,
+      strategyA,
+      strategyB,
+      safe,
+      timelock,
+    };
   }
 
   it("deployer EOA alone can no longer call admin functions after transfer", async () => {
@@ -174,5 +196,42 @@ describe("Safe multisig governance (Phase 3)", () => {
     await expect(
       vault.connect(alice).redeem(await vault.balanceOf(alice.address), alice.address, alice.address)
     ).to.not.be.reverted;
+  });
+
+  // Vault Readiness Report - Phase 0: đây là bài test cốt lõi của việc rà soát tách
+  // Guardian. Trước đây GUARDIAN_ROLE chỉ được cấp cho chính Safe - nghĩa là "phanh khẩn
+  // cấp" vẫn phải đi qua đúng quy trình đa chữ ký chậm giống hệt rebalance. Giờ 1 guardian
+  // cá nhân (KHÔNG phải owner của Safe, KHÔNG cần gom chữ ký, KHÔNG cần Safe transaction)
+  // phải tự pause được ngay trong 1 giao dịch thường.
+  it("a single individual guardian (not a Safe owner) can pause alone, with zero Safe coordination", async () => {
+    const { guardian1, alice, vault } = await loadFixture(deployWithSafeFixture);
+
+    const amount = 1_000n * ONE_USDC;
+    await vault.connect(alice).deposit(amount, alice.address);
+
+    // Không hề gọi execSafeTransaction ở đây - guardian1 tự ký 1 giao dịch bình thường.
+    await expect(vault.connect(guardian1).pause()).to.not.be.reverted;
+
+    expect(await vault.paused()).to.equal(true);
+    await expect(vault.connect(alice).deposit(amount, alice.address)).to.be.reverted;
+    await expect(
+      vault.connect(alice).redeem(await vault.balanceOf(alice.address), alice.address, alice.address)
+    ).to.not.be.reverted;
+  });
+
+  it("being a Safe owner does NOT by itself grant pause rights - GUARDIAN_ROLE must be a separate, explicit grant", async () => {
+    const { ownerC, vault } = await loadFixture(deployWithSafeFixture);
+
+    // ownerC là 1 trong 3 owner của Safe nhưng KHÔNG nằm trong danh sách guardian1/guardian2
+    // được cấp GUARDIAN_ROLE riêng - việc là chủ sở hữu multisig không ngầm định có quyền
+    // pause, đúng nguyên tắc tách quyền rõ ràng thay vì gộp chung.
+    await expect(vault.connect(ownerC).pause()).to.be.reverted;
+  });
+
+  it("either individual guardian can pause independently of the other (no coordination needed between guardians)", async () => {
+    const { guardian2, vault } = await loadFixture(deployWithSafeFixture);
+
+    await expect(vault.connect(guardian2).pause()).to.not.be.reverted;
+    expect(await vault.paused()).to.equal(true);
   });
 });
