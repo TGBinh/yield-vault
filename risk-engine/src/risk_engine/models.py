@@ -5,6 +5,8 @@ per the project's code-language convention.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -45,8 +47,18 @@ class AllocationSuggestion(BaseModel):
 
 class OptimizationResult(BaseModel):
     """Full output of one optimization run - what the Backend/dashboard reads and
-    displays as a human-reviewable proposal (never auto-executed in Phase 3)."""
+    displays as a human-reviewable proposal (never auto-executed in Phase 3).
+
+    Vault Security Audit - High: trước đây khi DefiLlama/RPC sập, `_safe_call` âm thầm
+    dùng giá trị mặc định bảo thủ (TVL=0, volatility=0.20) khiến mọi strategy tụt dưới
+    ngưỡng risk score -> allocations=[] - kết quả này KHÔNG PHÂN BIỆT ĐƯỢC với "mọi
+    strategy đều thực sự quá rủi ro". `data_quality`/`failed_sources` tách bạch 2 tình
+    huống đó ra để tầng hiển thị/Policy Engine không hiểu nhầm 1 sự cố API bên ngoài
+    thành 1 khuyến nghị rút hết vốn.
+    """
 
     allocations: list[AllocationSuggestion]
     total_weight_bps: int
     generated_at: str
+    data_quality: Literal["complete", "degraded", "unusable"] = "complete"
+    failed_sources: list[str] = Field(default_factory=list)
