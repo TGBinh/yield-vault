@@ -27,9 +27,23 @@ function makePool(registeredStrategies: string[]) {
   } as unknown as import('pg').Pool;
 }
 
+/// Fake ioredis giả lập đúng semantics của SET key value PX ms NX (chỉ set khi key chưa
+/// tồn tại, trả về null nếu đã có) - đủ để test PolicyService mà không cần Redis thật.
+function makeRedis() {
+  const store = new Map<string, string>();
+  return {
+    set: jest.fn(async (key: string, value: string, ...args: unknown[]) => {
+      if (args.includes('NX') && store.has(key)) return null;
+      store.set(key, value);
+      return 'OK';
+    }),
+    get: jest.fn(async (key: string) => store.get(key) ?? null),
+  } as unknown as import('ioredis').default;
+}
+
 describe('PolicyService (Phase 4 - adversarial tests)', () => {
   it('approves a valid recommendation and produces an ExecutionIntent', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]));
+    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const verdict = await service.evaluate(makeRecommendation());
 
@@ -39,7 +53,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('rejects when allocations do not sum to 10000 bps', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]));
+    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const verdict = await service.evaluate(
       makeRecommendation({
@@ -56,7 +70,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('rejects a strategy that is not registered (whitelist violation)', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A]));
+    const service = new PolicyService(makePool([STRATEGY_A]), makeRedis());
 
     const verdict = await service.evaluate(
       makeRecommendation({
@@ -72,7 +86,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('rejects a single strategy exceeding the 70% concentration cap even if the AI claims high confidence', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]));
+    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const verdict = await service.evaluate(
       makeRecommendation({
@@ -89,7 +103,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('rejects a low-confidence AI recommendation even when numerically valid', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]));
+    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const verdict = await service.evaluate(makeRecommendation({ source: 'ai', confidence: 0.1 }));
 
@@ -98,7 +112,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('enforces a rebalance cooldown after an approval', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]));
+    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const first = await service.evaluate(makeRecommendation());
     expect(first.approved).toBe(true);
@@ -109,7 +123,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('accepts small rounding drift in the bps sum (within tolerance)', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]));
+    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const verdict = await service.evaluate(
       makeRecommendation({

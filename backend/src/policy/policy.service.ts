@@ -1,6 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Pool } from 'pg';
+import type Redis from 'ioredis';
 import { PG_POOL } from '../database/database.constants';
+import { REDIS_CLIENT } from '../redis/redis.constants';
 import {
   ExecutionIntent,
   PolicyVerdict,
@@ -16,6 +18,7 @@ const BPS_SUM_TOLERANCE = 5; // rounding drift, same tolerance risk-engine's own
 /// engine claims to have already enforced.
 const MAX_SINGLE_STRATEGY_BPS = 7_000; // no strategy > 70% of the vault
 const MIN_REBALANCE_INTERVAL_MS = 60 * 60 * 1000; // 1 rebalance/hour max
+const REBALANCE_COOLDOWN_KEY = 'policy:last-rebalance-approved-at';
 const MIN_CONFIDENCE_THRESHOLD = 0.3;
 const EXECUTION_INTENT_TTL_MS = 15 * 60 * 1000; // human must approve within 15 minutes
 
@@ -34,12 +37,10 @@ const EXECUTION_INTENT_TTL_MS = 15 * 60 * 1000; // human must approve within 15 
 /// this service produced after every rule below passed.
 @Injectable()
 export class PolicyService {
-  // Simplification for this phase (documented, not hidden): in-memory only, resets on
-  // backend restart. A real deployment needs this persisted (Postgres/Redis) so the
-  // cooldown survives restarts and is shared across multiple backend instances.
-  private lastApprovedAt: Date | null = null;
-
-  constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
+  constructor(
+    @Inject(PG_POOL) private readonly pool: Pool,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+  ) {}
 
   async evaluate(recommendation: RecommendationDto): Promise<PolicyVerdict> {
     const registeredStrategies = await this.getRegisteredStrategies();
@@ -49,9 +50,33 @@ export class PolicyService {
       return { approved: false, reason: rejection, executionIntent: null };
     }
 
-    this.lastApprovedAt = new Date();
+    // Vault Readiness Report - Phase 0: cooldown giờ nằm ở Redis (SET NX PX), không còn
+    // in-memory - sống sót qua restart và đúng ngay cả khi chạy nhiều backend instance
+    // cùng lúc, vì SET NX là 1 lệnh atomic (2 instance không thể cùng "thắng" claim).
+    const cooldownRejection = await this.tryClaimRebalanceSlot();
+    if (cooldownRejection) {
+      return { approved: false, reason: cooldownRejection, executionIntent: null };
+    }
+
     const executionIntent = this.buildExecutionIntent(recommendation);
     return { approved: true, reason: 'All policy checks passed', executionIntent };
+  }
+
+  private async tryClaimRebalanceSlot(): Promise<string | null> {
+    const now = Date.now();
+    const claimed = await this.redis.set(
+      REBALANCE_COOLDOWN_KEY,
+      String(now),
+      'PX',
+      MIN_REBALANCE_INTERVAL_MS,
+      'NX',
+    );
+    if (claimed === 'OK') return null;
+
+    const lastApprovedAtMs = Number(await this.redis.get(REBALANCE_COOLDOWN_KEY));
+    const elapsed = now - lastApprovedAtMs;
+    const waitMinutes = Math.ceil((MIN_REBALANCE_INTERVAL_MS - elapsed) / 60_000);
+    return `Rebalance cooldown active - last approval was ${Math.round(elapsed / 60_000)} min ago, must wait ${waitMinutes} more minute(s)`;
   }
 
   private checkRules(
@@ -75,14 +100,6 @@ export class PolicyService {
 
     if (recommendation.confidence < MIN_CONFIDENCE_THRESHOLD) {
       return `Confidence ${recommendation.confidence} is below the minimum threshold of ${MIN_CONFIDENCE_THRESHOLD}`;
-    }
-
-    if (this.lastApprovedAt) {
-      const elapsed = Date.now() - this.lastApprovedAt.getTime();
-      if (elapsed < MIN_REBALANCE_INTERVAL_MS) {
-        const waitMinutes = Math.ceil((MIN_REBALANCE_INTERVAL_MS - elapsed) / 60_000);
-        return `Rebalance cooldown active - last approval was ${Math.round(elapsed / 60_000)} min ago, must wait ${waitMinutes} more minute(s)`;
-      }
     }
 
     return null;
