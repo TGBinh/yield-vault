@@ -25,6 +25,11 @@ contract StrategyManager is IStrategyManager, AccessControl {
     using SafeERC20 for IERC20;
 
     bytes32 public constant STRATEGIST_ROLE = keccak256("STRATEGIST_ROLE");
+    /// @notice Quyền gọi `setAllocations` (rebalance thật). Tách riêng khỏi STRATEGIST_ROLE
+    /// (chỉ dùng cho `registerStrategy`) de multisig KHONG con quyen rebalance truc tiep
+    /// sau khi da chuyen giao het EXECUTOR_ROLE cho RebalanceTimelock - xem
+    /// RebalanceTimelock.sol va PLAN.md "Bao cao readiness - Phase 0".
+    bytes32 public constant EXECUTOR_ROLE = keccak256("EXECUTOR_ROLE");
     uint16 public constant BPS_DENOMINATOR = 10_000;
 
     error OnlyVault();
@@ -53,6 +58,11 @@ contract StrategyManager is IStrategyManager, AccessControl {
         vault = _vault;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(STRATEGIST_ROLE, admin);
+        // Cap ban dau cho admin de bootstrap allocation dau tien khi chua co Timelock.
+        // Trien khai production PHAI revoke role nay khoi admin sau khi da grant cho
+        // RebalanceTimelock (xem scripts/deploy.ts) - neu khong, viec tach quyen o day
+        // vo nghia vi admin van rebalance truc tiep duoc, bo qua Timelock.
+        _grantRole(EXECUTOR_ROLE, admin);
     }
 
     modifier onlyVault() {
@@ -75,7 +85,7 @@ contract StrategyManager is IStrategyManager, AccessControl {
     /// triển khai lại idle balance theo trọng số mới.
     function setAllocations(address[] calldata strategies, uint16[] calldata weightsBps)
         external
-        onlyRole(STRATEGIST_ROLE)
+        onlyRole(EXECUTOR_ROLE)
     {
         if (strategies.length != weightsBps.length) revert LengthMismatch();
 
