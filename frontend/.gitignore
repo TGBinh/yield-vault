@@ -17,7 +17,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
+# local env files (root .gitignore already ignores bare `.env` everywhere in the repo,
+# including here - kept explicit for anyone reading only this file)
+.env
 .env*.local
 
 # typescript

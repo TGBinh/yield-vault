@@ -7,9 +7,19 @@ import {
   blockLag,
   currentBlock as currentBlockGauge,
   eventsProcessedTotal,
+  logHandlingErrorsTotal,
   reorgsDetectedTotal,
   rpcErrorsTotal,
 } from "./metrics";
+
+/// Vault Security Audit - High: mỗi bảng dùng tên cột địa chỉ contract khác nhau
+/// (deposits/withdrawals: vault_address, strategy_events: contract_address) - cần biết
+/// đúng cột để lùi cursor khi 1 row bị xoá do reorg (xem confirmPendingRows).
+const REORG_TABLE_ADDRESS_COLUMN: Record<"deposits" | "withdrawals" | "strategy_events", string> = {
+  deposits: "vault_address",
+  withdrawals: "vault_address",
+  strategy_events: "contract_address",
+};
 
 const vaultAbi = vaultAbiJson as readonly unknown[];
 const strategyManagerAbi = strategyManagerAbiJson as readonly unknown[];
@@ -52,7 +62,7 @@ export class Watcher {
       JSON.stringify({
         level: "info",
         msg: "Starting watcher",
-        rpcUrl: config.rpcUrl,
+        rpcUrl: redactUrl(config.rpcUrl),
         chainId: config.chainId,
         confirmations: config.confirmations,
         pollIntervalMs: config.pollIntervalMs,
@@ -129,30 +139,46 @@ export class Watcher {
       return;
     }
 
+    // Vault Security Audit - Medium: chia nhỏ range - hầu hết RPC provider thật từ chối
+    // getLogs() với range quá lớn; không giới hạn nghĩa là sau 1 lần downtime dài, lỗi
+    // RPC lặp lại vĩnh viễn vì range luôn vượt giới hạn provider.
+    const maxBlockRange = BigInt(config.maxBlockRange);
+    const toBlock = fromBlock + maxBlockRange - 1n < currentBlock ? fromBlock + maxBlockRange - 1n : currentBlock;
+
     const logs = await this.client.getLogs({
       address: contract.address,
       fromBlock,
-      toBlock: currentBlock,
+      toBlock,
     });
 
+    // Vault Security Audit - High: trước đây lỗi ghi Postgres chỉ được log ra rồi bỏ
+    // qua, nhưng cursor vẫn tiến tới `toBlock` vô điều kiện - 1 lần Postgres
+    // timeout/deadlock thoáng qua trong lúc có Deposit/Withdraw thật là mất event đó
+    // VĨNH VIỄN (block không bao giờ được quét lại). Giờ: dừng lại ở log lỗi đầu tiên,
+    // lưu cursor NGAY TRƯỚC block đó, và rethrow để tick sau retry đúng chỗ - an toàn
+    // để re-xử lý các log đã thành công trong cùng block nhờ ON CONFLICT DO NOTHING.
     for (const log of logs) {
       try {
         await this.handleLog(contract, log);
       } catch (err) {
+        logHandlingErrorsTotal.inc({ contract: contract.name });
         console.error(
           JSON.stringify({
             level: "error",
-            msg: "Failed to handle log",
+            msg: "Failed to handle log - holding cursor back, will retry from this block",
             contract: contract.name,
             txHash: log.transactionHash,
             logIndex: log.logIndex,
             error: String(err),
           }),
         );
+        const safeBlock = log.blockNumber !== null && log.blockNumber > fromBlock ? log.blockNumber - 1n : fromBlock - 1n;
+        await this.saveCursor(contract.address, safeBlock);
+        throw err;
       }
     }
 
-    await this.saveCursor(contract.address, currentBlock);
+    await this.saveCursor(contract.address, toBlock);
   }
 
   private async getBlockTimestamp(blockNumber: bigint): Promise<bigint> {
@@ -263,8 +289,9 @@ export class Watcher {
     if (confirmationThreshold < 0n) return;
 
     for (const table of ["deposits", "withdrawals", "strategy_events"] as const) {
-      const pending = await pool.query<{ id: number; tx_hash: string; block_number: string }>(
-        `SELECT id, tx_hash, block_number FROM ${table}
+      const addressColumn = REORG_TABLE_ADDRESS_COLUMN[table];
+      const pending = await pool.query<{ id: number; tx_hash: string; block_number: string; contract_address: string }>(
+        `SELECT id, tx_hash, block_number, ${addressColumn} AS contract_address FROM ${table}
          WHERE chain_id = $1 AND confirmed = FALSE AND block_number <= $2`,
         [config.chainId, confirmationThreshold.toString()],
       );
@@ -285,9 +312,26 @@ export class Watcher {
             }),
           );
           await pool.query(`DELETE FROM ${table} WHERE id = $1`, [row.id]);
+
+          // Vault Security Audit - High: trước đây cursor KHÔNG được lùi lại sau khi xoá
+          // row do reorg - transaction bị orphan thường được mine lại ở 1 block SAU đó
+          // (quay lại mempool), nhưng nếu cursor đã vượt qua block mới đó thì watcher
+          // không bao giờ quét lại để tìm thấy nó, và event thật (Deposit của user) biến
+          // mất khỏi DB vĩnh viễn dù trên chain vẫn tồn tại. Lùi cursor về ngay trước
+          // block bị orphan để buộc rescan.
+          await this.rewindCursor(row.contract_address as `0x${string}`, BigInt(row.block_number) - 1n);
         }
       }
     }
+  }
+
+  private async rewindCursor(address: `0x${string}`, toBlock: bigint): Promise<void> {
+    await pool.query(
+      `UPDATE indexer_cursors
+       SET last_scanned_block = LEAST(last_scanned_block, $3::bigint), updated_at = now()
+       WHERE chain_id = $1 AND contract_address = $2`,
+      [config.chainId, address.toLowerCase(), toBlock.toString()],
+    );
   }
 
   private async transactionStillOnChain(txHash: `0x${string}`, expectedBlockNumber: bigint): Promise<boolean> {
@@ -314,6 +358,19 @@ function decodeEventLog(
   } catch {
     // Log doesn't match any event in this ABI (e.g. Transfer/Approval on the Vault) - skip silently.
     return null;
+  }
+}
+
+/// Vault Security Audit - High: RPC URL production thật (Alchemy/Infura...) gần như
+/// chắc chắn có API key nằm ngay trong path - log nguyên URL nghĩa là key đó lọt vào
+/// log aggregator (thường có quyền đọc rộng hơn secret store rất nhiều). Chỉ giữ lại
+/// protocol + host, bỏ path/query.
+export function redactUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return "<invalid-url>";
   }
 }
 

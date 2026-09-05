@@ -18,6 +18,11 @@ const envSchema = z.object({
   CONFIRMATIONS: z.coerce.number().int().nonnegative().default(3),
   POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   METRICS_PORT: z.coerce.number().int().positive().default(9464),
+  // Vault Security Audit - Medium: giới hạn block range mỗi lần getLogs() - hầu hết RPC
+  // provider thật (Alchemy/Infura) từ chối range quá lớn. Không giới hạn nghĩa là sau 1
+  // lần downtime dài, range vượt giới hạn provider -> lỗi RPC lặp lại vĩnh viễn, cursor
+  // không bao giờ tiến được (đã xảy ra là 1 finding thật trong Vault Security Audit).
+  MAX_BLOCK_RANGE: z.coerce.number().int().positive().default(2000),
 });
 
 type Env = z.infer<typeof envSchema>;
@@ -44,6 +49,7 @@ export const config = {
   confirmations: env.CONFIRMATIONS,
   pollIntervalMs: env.POLL_INTERVAL_MS,
   metricsPort: env.METRICS_PORT,
+  maxBlockRange: env.MAX_BLOCK_RANGE,
 };
 
 export type Config = typeof config;

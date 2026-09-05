@@ -2,6 +2,13 @@
 # Contracts are NOT part of this compose file - run `npx hardhat node` and
 # `npx hardhat run scripts/deploy.ts --network localhost` separately in contracts/,
 # then fill in VAULT_ADDRESS / STRATEGY_MANAGER_ADDRESS below before `docker compose up`.
+#
+# Vault Security Audit: mọi credential dưới đây giờ đọc từ .env (copy từ .env.example),
+# KHÔNG còn hardcode "postgres"/"admin" ngầm định - nếu thiếu, compose fail-fast thay vì
+# âm thầm chạy với credential mặc định ai cũng đoán được. Port của Postgres/Redis/
+# Grafana/Prometheus/Alertmanager chỉ bind 127.0.0.1 (không mở ra LAN/Internet); risk-
+# engine/ai-engine không publish port ra host nữa - backend gọi qua network nội bộ
+# Docker (risk-engine:8002/ai-engine:8001), test trực tiếp bằng `docker compose exec`.
 name: yield-vault
 
 services:
@@ -10,10 +17,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env, see .env.example}
       POSTGRES_DB: yield_vault
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -25,10 +32,11 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env (copy .env.example) - no hardcoded default}"]
     ports:
-      - "6380:6379"
+      - "127.0.0.1:6380:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env, see .env.example}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -44,21 +52,21 @@ services:
     environment:
       RPC_URL: ${RPC_URL:-http://host.docker.internal:8545}
       CHAIN_ID: ${CHAIN_ID:-31337}
-      POSTGRES_URL: postgres://postgres:postgres@postgres:5432/yield_vault
+      POSTGRES_URL: postgres://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env, see .env.example}@postgres:5432/yield_vault
       VAULT_ADDRESS: ${VAULT_ADDRESS}
       STRATEGY_MANAGER_ADDRESS: ${STRATEGY_MANAGER_ADDRESS}
       CONFIRMATIONS: ${CONFIRMATIONS:-3}
       POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-2000}
       METRICS_PORT: 9464
     ports:
-      - "9464:9464"
+      - "127.0.0.1:9464:9464"
 
   risk-engine:
     build:
       context: risk-engine
     restart: unless-stopped
-    ports:
-      - "8002:8002"
+    # Không publish port ra host - chỉ backend (cùng network Docker nội bộ) gọi được,
+    # qua http://risk-engine:8002. Debug thủ công: `docker compose exec risk-engine sh`.
 
   ai-engine:
     build:
@@ -66,8 +74,7 @@ services:
     restart: unless-stopped
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    ports:
-      - "8001:8001"
+    # Không publish port ra host - lý do tương tự risk-engine ở trên.
 
   backend:
     build:
@@ -85,10 +92,11 @@ services:
         condition: service_started
     environment:
       PORT: 3001
-      POSTGRES_URL: postgres://postgres:postgres@postgres:5432/yield_vault
-      REDIS_URL: redis://redis:6379
+      POSTGRES_URL: postgres://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env, see .env.example}@postgres:5432/yield_vault
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env, see .env.example}@redis:6379
       RISK_ENGINE_URL: http://risk-engine:8002
       AI_ENGINE_URL: http://ai-engine:8001
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env (copy .env.example) - guards POST /policy/evaluate}
     ports:
       - "3001:3001"
 
@@ -102,7 +110,7 @@ services:
       - ./observability/prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
       - prometheus-data:/prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     depends_on:
       - backend
       - indexer
@@ -116,21 +124,21 @@ services:
     volumes:
       - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     ports:
-      - "9093:9093"
+      - "127.0.0.1:9093:9093"
 
   grafana:
     image: grafana/grafana:11.3.1
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env (copy .env.example) - no hardcoded default}
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "3002:3000"
+      - "127.0.0.1:3002:3000"
     depends_on:
       - prometheus
 

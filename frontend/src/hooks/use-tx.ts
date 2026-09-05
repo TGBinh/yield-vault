@@ -6,6 +6,7 @@ import { waitForTransactionReceipt } from "wagmi/actions";
 import { toast } from "sonner";
 import type { Abi } from "viem";
 import { shortenAddress } from "@/lib/format";
+import { EXPECTED_CHAIN_ID } from "@/lib/contracts";
 
 type WriteArgs = {
   address: `0x${string}`;
@@ -38,7 +39,11 @@ export function useTx() {
       setPendingLabel(label);
       const toastId = toast.loading(`${label} — confirm in wallet…`);
       try {
-        const hash = await writeContractAsync(write);
+        // Vault Security Audit - High: không khoá chainId nghĩa là wagmi ký trên chain
+        // đang active của ví, không phải chain vault thật sự triển khai - nếu ví đang ở
+        // sai mạng, tx gửi tới 1 địa chỉ hoàn toàn khác trên mạng đó. Ép chainId để
+        // wagmi tự throw ChainMismatchError thay vì ký nhầm.
+        const hash = await writeContractAsync({ ...write, chainId: EXPECTED_CHAIN_ID });
         toast.loading(`${label} — waiting for confirmation`, {
           id: toastId,
           description: shortenAddress(hash, 6),

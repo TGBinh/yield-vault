@@ -40,6 +40,17 @@ export const reorgsDetectedTotal = new client.Counter({
   registers: [registry],
 });
 
+/// Vault Security Audit - High: trước đây lỗi ghi 1 log vào Postgres chỉ được console.error
+/// rồi bỏ qua, không có metric riêng - không ai biết đã mất event thật cho tới khi user
+/// báo thiếu tiền. Metric này tách biệt với rpcErrorsTotal (lỗi mạng) để phân biệt rõ
+/// nguyên nhân khi alert.
+export const logHandlingErrorsTotal = new client.Counter({
+  name: "yield_vault_indexer_log_handling_errors_total",
+  help: "Total number of on-chain logs that failed to write to Postgres (cursor is held back, not lost)",
+  labelNames: ["contract"],
+  registers: [registry],
+});
+
 export function startMetricsServer(): http.Server {
   const server = http.createServer((req, res) => {
     if (req.url === "/metrics") {

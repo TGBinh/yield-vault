@@ -77,7 +77,9 @@ export function VaultDashboard() {
               Mint free mock USDC to try deposits and withdrawals. This faucet only
               exists on the local test network — never available in production.
             </p>
-            <FaucetButton usdcDecimals={usdcDecimals} onSuccess={refetchAll} />
+            <fieldset disabled={disabled} className="disabled:opacity-50">
+              <FaucetButton usdcDecimals={usdcDecimals} onSuccess={refetchAll} />
+            </fieldset>
           </CardContent>
         </Card>
 

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTx } from "@/hooks/use-tx";
 import { usdcContract, vaultContract, CONTRACTS } from "@/lib/contracts";
-import { formatTokenAmount, parseTokenAmount } from "@/lib/format";
+import { formatTokenAmount, parseTokenAmount, toRawAmountString } from "@/lib/format";
 
 export function DepositForm({
   usdcDecimals,
@@ -48,7 +48,7 @@ export function DepositForm({
 
   const handleMax = () => {
     if (usdcBalance !== undefined) {
-      setRawAmount(formatTokenAmount(usdcBalance, usdcDecimals, { maxFractionDigits: usdcDecimals }));
+      setRawAmount(toRawAmountString(usdcBalance, usdcDecimals));
     }
   };
 

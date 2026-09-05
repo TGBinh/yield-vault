@@ -1,6 +1,6 @@
 import { config } from "./config";
 import { closePool, runMigrations } from "./db/client";
-import { Watcher } from "./watcher";
+import { Watcher, redactUrl } from "./watcher";
 import { startMetricsServer } from "./metrics";
 
 function log(msg: string, extra: Record<string, unknown> = {}): void {
@@ -10,7 +10,7 @@ function log(msg: string, extra: Record<string, unknown> = {}): void {
 async function main(): Promise<void> {
   log("Indexer starting", {
     chainId: config.chainId,
-    rpcUrl: config.rpcUrl,
+    rpcUrl: redactUrl(config.rpcUrl),
     vaultAddress: config.vaultAddress,
     strategyManagerAddress: config.strategyManagerAddress,
   });

@@ -16,10 +16,16 @@ RUN npm run build --workspace=indexer
 
 FROM node:20-alpine
 WORKDIR /app
-COPY --from=build /app/node_modules node_modules
-COPY --from=build /app/indexer/node_modules indexer/node_modules
-COPY --from=build /app/indexer/dist indexer/dist
-COPY --from=build /app/indexer/package.json indexer/package.json
+# Vault Security Audit - High: node:20-alpine đã có sẵn user "node" (uid 1000) - chạy
+# bằng root không cần thiết nếu chỉ cần chown đúng lúc copy.
+COPY --from=build --chown=node:node /app/node_modules node_modules
+COPY --from=build --chown=node:node /app/indexer/node_modules indexer/node_modules
+COPY --from=build --chown=node:node /app/indexer/dist indexer/dist
+COPY --from=build --chown=node:node /app/indexer/package.json indexer/package.json
 WORKDIR /app/indexer
+USER node
+ENV NODE_ENV=production
 EXPOSE 9464
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:9464/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 CMD ["node", "dist/index.js"]

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTx } from "@/hooks/use-tx";
 import { vaultContract } from "@/lib/contracts";
-import { formatTokenAmount, parseTokenAmount } from "@/lib/format";
+import { formatTokenAmount, parseTokenAmount, toRawAmountString } from "@/lib/format";
 
 export function WithdrawForm({
   usdcDecimals,
@@ -45,7 +45,7 @@ export function WithdrawForm({
 
   const handleMax = () => {
     if (shareBalance !== undefined) {
-      setRawAmount(formatTokenAmount(shareBalance, shareDecimals, { maxFractionDigits: shareDecimals }));
+      setRawAmount(toRawAmountString(shareBalance, shareDecimals));
     }
   };
 
