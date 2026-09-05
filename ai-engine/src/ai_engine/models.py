@@ -9,7 +9,14 @@ future Keeper Bot) ever parses it to make a decision - only the structured field
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+# Vault Security Audit - Critical: strategy_id/rationale trước đây không giới hạn độ
+# dài/định dạng - đi thẳng vào prompt gửi Claude (xem llm_client._build_prompt), tạo bề
+# mặt prompt injection thật. risk_score/expected_apy trước đây không có bound, chấp nhận
+# NaN/Infinity làm hỏng JSON response phía sau (FastAPI serialize thành token
+# NaN/Infinity không hợp lệ theo chuẩn JSON).
+_STRATEGY_ID_PATTERN = r"^[a-z0-9][a-z0-9\-]{0,63}$"
 
 
 class OptimizationInputAllocation(BaseModel):
@@ -17,24 +24,26 @@ class OptimizationInputAllocation(BaseModel):
     receives as input (see risk-engine/src/risk_engine/models.py AllocationSuggestion,
     same shape kept in sync manually since these are two separate services)."""
 
-    strategy_id: str
+    model_config = ConfigDict(extra="forbid")
+
+    strategy_id: str = Field(pattern=_STRATEGY_ID_PATTERN)
     target_weight_bps: int = Field(ge=0, le=10_000)
-    risk_score: float
-    expected_apy: float
-    rationale: str = ""
+    risk_score: float = Field(ge=0, le=100)
+    expected_apy: float = Field(ge=0, le=10)
+    rationale: str = Field(default="", max_length=256)
 
 
 class OptimizationInput(BaseModel):
     """Request body for POST /recommend - the risk-engine's OptimizationResult."""
 
-    allocations: list[OptimizationInputAllocation]
+    allocations: list[OptimizationInputAllocation] = Field(min_length=1, max_length=50)
 
 
 class AllocationSuggestion(BaseModel):
-    strategy_id: str
+    strategy_id: str = Field(pattern=_STRATEGY_ID_PATTERN)
     target_weight_bps: int = Field(ge=0, le=10_000)
-    risk_score: float
-    expected_apy: float
+    risk_score: float = Field(ge=0, le=100)
+    expected_apy: float = Field(ge=0, le=10)
 
 
 class Recommendation(BaseModel):
@@ -42,8 +51,8 @@ class Recommendation(BaseModel):
     (backend/src/policy/dto/recommendation.dto.ts) since the Policy Engine consumes this
     directly. Kept in sync manually across the Python/TypeScript boundary."""
 
-    allocations: list[AllocationSuggestion]
+    allocations: list[AllocationSuggestion] = Field(min_length=1, max_length=50)
     source: str = Field(pattern="^(ai|deterministic)$")
     confidence: float = Field(ge=0, le=1)
-    explanation: str
-    risk_flags: list[str] = Field(default_factory=list)
+    explanation: str = Field(max_length=2000)
+    risk_flags: list[str] = Field(default_factory=list, max_length=20)

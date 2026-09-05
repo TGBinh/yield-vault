@@ -8,6 +8,18 @@ on:
 
 env:
   NODE_VERSION: "20"
+  # Vault Security Audit - High: pin forge-std to an exact commit + verify its checksum
+  # instead of downloading the moving `master` branch - a compromised repo/CDN could
+  # otherwise inject arbitrary code that runs with this workflow's GITHUB_TOKEN.
+  FORGE_STD_SHA: "886b4f8b63409ef474542de6394d25a9b5908ed3"
+  FORGE_STD_SHA256: "f14d8dede129bf17c91ed2528dc495b40a9cd4bcd06073a156efbd7a1a82ef0c"
+
+# Vault Security Audit - Medium M1: no default `permissions` meant every job (including
+# the one downloading forge-std above) got the repo's default GITHUB_TOKEN permissions,
+# which can be write-all. Least-privilege default; `deploy-staging` already opts back
+# into `packages: write` where it actually needs it.
+permissions:
+  contents: read
 
 jobs:
   contracts-test:
@@ -20,7 +32,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - uses: foundry-rs/foundry-toolchain@v1
       - name: Install dependencies
-        run: npm install
+        run: npm ci --ignore-scripts
       # forge-std is intentionally gitignored (contracts/.gitignore) - it was installed
       # locally by downloading the zip directly (git submodules don't work here, see
       # PLAN.md GD3: contracts/ is nested inside an unrelated parent git history) - CI
@@ -28,10 +40,12 @@ jobs:
       - name: Restore forge-std
         working-directory: contracts
         run: |
+          set -euo pipefail
           mkdir -p lib
-          curl -sL -o /tmp/forge-std.zip https://github.com/foundry-rs/forge-std/archive/refs/heads/master.zip
+          curl -sL -o /tmp/forge-std.zip "https://github.com/foundry-rs/forge-std/archive/${FORGE_STD_SHA}.zip"
+          echo "${FORGE_STD_SHA256}  /tmp/forge-std.zip" | sha256sum -c -
           unzip -q /tmp/forge-std.zip -d /tmp
-          mv /tmp/forge-std-master lib/forge-std
+          mv "/tmp/forge-std-${FORGE_STD_SHA}" lib/forge-std
       - name: Hardhat compile
         working-directory: contracts
         run: npx hardhat compile
@@ -55,14 +69,16 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - uses: foundry-rs/foundry-toolchain@v1
       - name: Install dependencies
-        run: npm install
+        run: npm ci --ignore-scripts
       - name: Restore forge-std
         working-directory: contracts
         run: |
+          set -euo pipefail
           mkdir -p lib
-          curl -sL -o /tmp/forge-std.zip https://github.com/foundry-rs/forge-std/archive/refs/heads/master.zip
+          curl -sL -o /tmp/forge-std.zip "https://github.com/foundry-rs/forge-std/archive/${FORGE_STD_SHA}.zip"
+          echo "${FORGE_STD_SHA256}  /tmp/forge-std.zip" | sha256sum -c -
           unzip -q /tmp/forge-std.zip -d /tmp
-          mv /tmp/forge-std-master lib/forge-std
+          mv "/tmp/forge-std-${FORGE_STD_SHA}" lib/forge-std
       - name: Foundry fork tests (Aave + Morpho)
         working-directory: contracts
         run: forge test --match-contract "AaveStrategyForkTest|MorphoStrategyForkTest" -v
@@ -80,7 +96,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: npm install
+        run: npm ci --ignore-scripts
       - name: Install Slither
         # Pinned to the exact version verified locally (--exclude-dependencies --fail-high
         # confirmed exit 0 on this codebase) - an unpinned install can silently pick up a
@@ -98,7 +114,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - run: npm install
+      - run: npm ci --ignore-scripts
       - working-directory: indexer
         run: npm run typecheck
       - working-directory: indexer
@@ -112,7 +128,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - run: npm install
+      - run: npm ci --ignore-scripts
       - working-directory: backend
         run: npm test
       - working-directory: backend
@@ -126,7 +142,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - run: npm install
+      - run: npm ci --ignore-scripts
       - working-directory: frontend
         run: npm run build
 

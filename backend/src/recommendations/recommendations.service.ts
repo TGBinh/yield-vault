@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { plainToInstance } from 'class-transformer';
+import { validateOrReject } from 'class-validator';
 import { RecommendationDto } from '../policy/dto/recommendation.dto';
 import { PolicyService } from '../policy/policy.service';
 import { PolicyVerdict } from '../policy/dto/recommendation.dto';
@@ -47,7 +49,10 @@ export class RecommendationsService {
   async getLatestRecommendation(): Promise<RecommendationPipelineResult> {
     const optimizationResult = await this.fetchOptimizationResult();
     const recommendation = await this.fetchAiRecommendation(optimizationResult);
-    const policyVerdict = await this.policy.evaluate(recommendation);
+    // Vault Security Audit - Critical C3: đây là route public, chỉ để dashboard xem
+    // trước - KHÔNG được phép claim slot cooldown (đó là việc của POST /policy/evaluate,
+    // đứng sau InternalApiKeyGuard).
+    const policyVerdict = await this.policy.evaluate(recommendation, { claimSlot: false });
 
     return {
       optimizationResult: optimizationResult.optimization_result,
@@ -88,7 +93,7 @@ export class RecommendationsService {
         explanation: string;
         risk_flags: string[];
       };
-      return this.toRecommendationDto(body);
+      return await this.toRecommendationDto(body);
     } catch (err) {
       // PLAN.md GD4 §4: "nếu AI Engine timeout/lỗi, Optimization Engine tất định vẫn
       // chạy độc lập" - the ai-engine service itself already has this fallback
@@ -100,40 +105,54 @@ export class RecommendationsService {
     }
   }
 
-  private toRecommendationDto(body: {
+  /// Vault Security Audit - Critical C1: trước đây dựng `new RecommendationDto()` rồi
+  /// gán field tay - `ValidationPipe` toàn cục chỉ chạy trên request body vào
+  /// controller, KHÔNG chạy trên object dựng tay trong service, nên mọi decorator
+  /// (@IsInt, @Min, @Max...) trên DTO này là code chết trên đúng đường AI Engine ->
+  /// Policy Engine. `validateOrReject` ở đây chạy đúng các decorator đó tường minh; nếu
+  /// AI Engine trả dữ liệu sai schema, lỗi ném ra được bắt bởi catch() ở fetchAiRecommendation
+  /// và rơi về nhánh fallback tất định - không có đường nào bỏ qua validate.
+  private async toRecommendationDto(body: {
     allocations: { strategy_id: string; target_weight_bps: number; risk_score: number; expected_apy: number }[];
     source: 'ai' | 'deterministic';
     confidence: number;
     explanation: string;
     risk_flags: string[];
-  }): RecommendationDto {
-    const dto = new RecommendationDto();
-    dto.allocations = body.allocations.map((a) => ({
-      strategyId: a.strategy_id,
-      targetWeightBps: a.target_weight_bps,
-      riskScore: a.risk_score,
-      expectedApy: a.expected_apy,
-    }));
-    dto.source = body.source;
-    dto.confidence = body.confidence;
-    dto.explanation = body.explanation;
-    dto.riskFlags = body.risk_flags;
+  }): Promise<RecommendationDto> {
+    const dto = plainToInstance(RecommendationDto, {
+      allocations: body.allocations.map((a) => ({
+        strategyId: a.strategy_id,
+        targetWeightBps: a.target_weight_bps,
+        riskScore: a.risk_score,
+        expectedApy: a.expected_apy,
+      })),
+      source: body.source,
+      confidence: body.confidence,
+      explanation: body.explanation,
+      riskFlags: body.risk_flags,
+    });
+    await validateOrReject(dto, { whitelist: true, forbidNonWhitelisted: true });
     return dto;
   }
 
-  private deterministicPassthrough(optimizationResult: OptimizationResult): RecommendationDto {
-    const dto = new RecommendationDto();
-    dto.allocations = optimizationResult.optimization_result.allocations.map((a) => ({
-      strategyId: a.strategy_id,
-      targetWeightBps: a.target_weight_bps,
-      riskScore: a.risk_score,
-      expectedApy: a.expected_apy,
-    }));
-    dto.source = 'deterministic';
-    dto.confidence = 1;
-    dto.explanation =
-      'AI Engine service unreachable - showing the deterministic Risk/Optimization Engine proposal directly.';
-    dto.riskFlags = ['ai_unavailable'];
+  private async deterministicPassthrough(optimizationResult: OptimizationResult): Promise<RecommendationDto> {
+    const dto = plainToInstance(RecommendationDto, {
+      allocations: optimizationResult.optimization_result.allocations.map((a) => ({
+        strategyId: a.strategy_id,
+        targetWeightBps: a.target_weight_bps,
+        riskScore: a.risk_score,
+        expectedApy: a.expected_apy,
+      })),
+      source: 'deterministic',
+      confidence: 1,
+      explanation:
+        'AI Engine service unreachable - showing the deterministic Risk/Optimization Engine proposal directly.',
+      riskFlags: ['ai_unavailable'],
+    });
+    // Đây đã là fallback cuối cùng - nếu chính risk-engine trả dữ liệu không hợp lệ
+    // (NaN/Infinity...), để lỗi ném ra thành 500 thay vì âm thầm đưa NaN vào Policy
+    // Engine (risk-engine tự sửa lỗi nguồn ở đầu vào là đúng chỗ hơn để vá).
+    await validateOrReject(dto, { whitelist: true, forbidNonWhitelisted: true });
     return dto;
   }
 }

@@ -45,7 +45,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   it('approves a valid recommendation and produces an ExecutionIntent', async () => {
     const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
 
-    const verdict = await service.evaluate(makeRecommendation());
+    const verdict = await service.evaluate(makeRecommendation(), { claimSlot: true });
 
     expect(verdict.approved).toBe(true);
     expect(verdict.executionIntent).not.toBeNull();
@@ -62,6 +62,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
           { strategyId: STRATEGY_B, targetWeightBps: 3000, riskScore: 70, expectedApy: 0.03 },
         ],
       }),
+      { claimSlot: true },
     );
 
     expect(verdict.approved).toBe(false);
@@ -79,6 +80,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
           { strategyId: UNKNOWN_STRATEGY, targetWeightBps: 5000, riskScore: 90, expectedApy: 0.2 },
         ],
       }),
+      { claimSlot: true },
     );
 
     expect(verdict.approved).toBe(false);
@@ -96,6 +98,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
           { strategyId: STRATEGY_B, targetWeightBps: 1000, riskScore: 70, expectedApy: 0.03 },
         ],
       }),
+      { claimSlot: true },
     );
 
     expect(verdict.approved).toBe(false);
@@ -105,7 +108,9 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   it('rejects a low-confidence AI recommendation even when numerically valid', async () => {
     const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
 
-    const verdict = await service.evaluate(makeRecommendation({ source: 'ai', confidence: 0.1 }));
+    const verdict = await service.evaluate(makeRecommendation({ source: 'ai', confidence: 0.1 }), {
+      claimSlot: true,
+    });
 
     expect(verdict.approved).toBe(false);
     expect(verdict.reason).toMatch(/below the minimum threshold/);
@@ -114,10 +119,10 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   it('enforces a rebalance cooldown after an approval', async () => {
     const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
 
-    const first = await service.evaluate(makeRecommendation());
+    const first = await service.evaluate(makeRecommendation(), { claimSlot: true });
     expect(first.approved).toBe(true);
 
-    const second = await service.evaluate(makeRecommendation());
+    const second = await service.evaluate(makeRecommendation(), { claimSlot: true });
     expect(second.approved).toBe(false);
     expect(second.reason).toMatch(/cooldown active/);
   });
@@ -132,8 +137,75 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
           { strategyId: STRATEGY_B, targetWeightBps: 3997, riskScore: 70, expectedApy: 0.03 },
         ],
       }),
+      { claimSlot: true },
     );
 
     expect(verdict.approved).toBe(true);
+  });
+
+  // Vault Security Audit - Critical C2: verify các payload đã chứng minh bypass được
+  // Policy Engine trước khi vá, giờ phải bị reject rõ ràng.
+  it('rejects NaN targetWeightBps instead of letting it slip through numeric comparisons', async () => {
+    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
+
+    const verdict = await service.evaluate(
+      makeRecommendation({
+        allocations: [
+          { strategyId: STRATEGY_A, targetWeightBps: Number.NaN, riskScore: 80, expectedApy: 0.05 },
+          { strategyId: STRATEGY_B, targetWeightBps: 4000, riskScore: 70, expectedApy: 0.03 },
+        ],
+      }),
+      { claimSlot: true },
+    );
+
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reason).toMatch(/invalid targetWeightBps/);
+  });
+
+  it('rejects a negative weight used to disguise over-100%-exposure while the sum still nets to 10000', async () => {
+    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B, UNKNOWN_STRATEGY]), makeRedis());
+
+    const verdict = await service.evaluate(
+      makeRecommendation({
+        allocations: [
+          { strategyId: STRATEGY_A, targetWeightBps: 7000, riskScore: 80, expectedApy: 0.05 },
+          { strategyId: STRATEGY_B, targetWeightBps: 7000, riskScore: 70, expectedApy: 0.03 },
+          { strategyId: UNKNOWN_STRATEGY, targetWeightBps: -4000, riskScore: 10, expectedApy: 0.01 },
+        ],
+      }),
+      { claimSlot: true },
+    );
+
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reason).toMatch(/invalid targetWeightBps/);
+  });
+
+  it('rejects the same strategy split across multiple entries to dodge the single-strategy cap', async () => {
+    const service = new PolicyService(makePool([STRATEGY_A]), makeRedis());
+
+    const verdict = await service.evaluate(
+      makeRecommendation({
+        allocations: [
+          { strategyId: STRATEGY_A, targetWeightBps: 7000, riskScore: 80, expectedApy: 0.05 },
+          { strategyId: STRATEGY_A.toUpperCase(), targetWeightBps: 3000, riskScore: 80, expectedApy: 0.05 },
+        ],
+      }),
+      { claimSlot: true },
+    );
+
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reason).toMatch(/exceeds max single-strategy cap/);
+  });
+
+  it('peeking the verdict (claimSlot: false) never consumes the cooldown slot', async () => {
+    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
+
+    const peek1 = await service.evaluate(makeRecommendation(), { claimSlot: false });
+    const peek2 = await service.evaluate(makeRecommendation(), { claimSlot: false });
+    expect(peek1.approved).toBe(true);
+    expect(peek2.approved).toBe(true);
+
+    const claimed = await service.evaluate(makeRecommendation(), { claimSlot: true });
+    expect(claimed.approved).toBe(true);
   });
 });

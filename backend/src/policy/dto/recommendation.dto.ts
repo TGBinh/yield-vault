@@ -24,10 +24,10 @@ export class AllocationSuggestionDto {
   @Max(10_000)
   targetWeightBps!: number;
 
-  @IsNumber()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
   riskScore!: number;
 
-  @IsNumber()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
   expectedApy!: number;
 }
 
@@ -41,7 +41,7 @@ export class RecommendationDto {
   @IsIn(['ai', 'deterministic'])
   source!: 'ai' | 'deterministic';
 
-  @IsNumber()
+  @IsNumber({ allowNaN: false, allowInfinity: false })
   @Min(0)
   @Max(1)
   confidence!: number;
