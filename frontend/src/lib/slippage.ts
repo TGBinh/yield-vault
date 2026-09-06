@@ -3,21 +3,25 @@
  * convertToAssets) đọc lúc user gõ số, nhưng lúc ký giao dịch thật không re-check gì -
  * giữa preview và lúc tx được mine, share price có thể đổi (rebalance chạy giữa chừng,
  * hoặc MEV sandwich), user nhận ít hơn hẳn so với những gì họ thấy mà không có cách từ
- * chối. Vault ERC-4626 hiện tại KHÔNG có tham số minOut ở cấp contract (deposit/
- * withdraw/redeem chuẩn không nhận min-output) - đây là biện pháp giảm thiểu tạm thời ở
- * tầng client: so lại giá trị "tươi" ngay trước khi ký với giá trị preview user đã thấy,
- * chặn tx nếu lệch quá ngưỡng. Giải pháp đầy đủ (true minOut/deadline) cần thêm tham số
- * ở contract - ngoài phạm vi patch frontend-only này.
+ * chối. Đã thêm `depositWithMinShares`/`redeemWithMinAssets` ở Vault.sol (minOut +
+ * deadline thật, check atomic on-chain - nếu không đạt, toàn bộ tx rollback) thay cho
+ * bước đọc-lại-rồi-tự-chặn phía client trước đây (đã gỡ, không còn cần thiết vì contract
+ * giờ tự bảo vệ đúng ngay trong cùng giao dịch).
  */
 export const DEFAULT_SLIPPAGE_TOLERANCE_BPS = 50n; // 0.5%
 const BPS_DENOMINATOR = 10_000n;
+export const DEFAULT_DEADLINE_SECONDS = 20 * 60; // 20 phút, đủ cho user xác nhận ví chậm
 
-export function isWithinSlippageTolerance(
+/// @notice Tính `minOut` để truyền vào `depositWithMinShares`/`redeemWithMinAssets` từ
+/// giá trị preview user đang thấy trên UI - trừ đi đúng phần trăm dung sai cho phép.
+export function applySlippageTolerance(
   previewValue: bigint,
-  freshValue: bigint,
   toleranceBps: bigint = DEFAULT_SLIPPAGE_TOLERANCE_BPS,
-): boolean {
-  if (previewValue === 0n) return freshValue === 0n;
-  const diff = previewValue > freshValue ? previewValue - freshValue : freshValue - previewValue;
-  return diff * BPS_DENOMINATOR <= previewValue * toleranceBps;
+): bigint {
+  return previewValue - (previewValue * toleranceBps) / BPS_DENOMINATOR;
+}
+
+/// @notice Deadline dạng unix timestamp (giây) cho tham số `deadline` của contract.
+export function makeDeadline(secondsFromNow: number = DEFAULT_DEADLINE_SECONDS): bigint {
+  return BigInt(Math.floor(Date.now() / 1000) + secondsFromNow);
 }

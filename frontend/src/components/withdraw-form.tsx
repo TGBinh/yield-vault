@@ -1,10 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useAccount, useConfig, useReadContract } from "wagmi";
-import { readContract } from "wagmi/actions";
+import { useAccount, useReadContract } from "wagmi";
 import { ArrowUpFromLine } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +9,7 @@ import { useTx } from "@/hooks/use-tx";
 import { useAmountInput } from "@/hooks/use-amount-input";
 import { vaultContract } from "@/lib/contracts";
 import { formatTokenAmount } from "@/lib/format";
-import { isWithinSlippageTolerance } from "@/lib/slippage";
+import { applySlippageTolerance, makeDeadline } from "@/lib/slippage";
 
 export function WithdrawForm({
   usdcDecimals,
@@ -26,13 +23,11 @@ export function WithdrawForm({
   onSuccess: () => void;
 }) {
   const { address } = useAccount();
-  const config = useConfig();
   const { run, isPending } = useTx();
-  const [isCheckingPrice, setIsCheckingPrice] = useState(false);
   const { rawAmount, setRawAmount, amount: shares, isValid, exceedsBalance, setMax, reset } =
     useAmountInput(shareDecimals, shareBalance);
 
-  const { data: previewAssets, refetch: refetchPreviewAssets } = useReadContract({
+  const { data: previewAssets } = useReadContract({
     ...vaultContract,
     functionName: "convertToAssets",
     args: [shares ?? 0n],
@@ -43,31 +38,14 @@ export function WithdrawForm({
     if (!isValid || !address) return;
     if (previewAssets === undefined) return;
 
-    setIsCheckingPrice(true);
-    try {
-      // Không có minOut ở cấp contract (xem lib/slippage.ts) -> đọc lại convertToAssets
-      // ngay trước khi ký để bắt trường hợp share price đã đổi kể từ lúc user xem preview.
-      const freshAssets = (await readContract(config, {
-        ...vaultContract,
-        functionName: "convertToAssets",
-        args: [shares],
-      })) as bigint;
-
-      if (!isWithinSlippageTolerance(previewAssets as bigint, freshAssets)) {
-        toast.error("Share price changed since you last checked", {
-          description: "Please review the updated amount below and confirm again.",
-        });
-        refetchPreviewAssets();
-        return;
-      }
-    } finally {
-      setIsCheckingPrice(false);
-    }
-
+    // Vault Security Audit - High: `redeemWithMinAssets` tự check minOut/deadline ngay
+    // on-chain trong cùng transaction (atomic) - không cần đọc lại giá thủ công ở
+    // client nữa như trước, và không có khoảng hở thời gian giữa lần đọc cuối và lúc ký.
+    const minAssets = applySlippageTolerance(previewAssets as bigint);
     const receipt = await run("Withdraw", {
       ...vaultContract,
-      functionName: "redeem",
-      args: [shares, address, address],
+      functionName: "redeemWithMinAssets",
+      args: [shares, address, address, minAssets, makeDeadline()],
     });
     if (receipt) {
       reset();
@@ -75,7 +53,7 @@ export function WithdrawForm({
     }
   };
 
-  const disabled = !isValid || exceedsBalance || isPending || isCheckingPrice;
+  const disabled = !isValid || exceedsBalance || isPending;
 
   return (
     <div className="flex flex-col gap-4">

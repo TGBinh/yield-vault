@@ -1,10 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useAccount, useConfig, useReadContract } from "wagmi";
-import { readContract } from "wagmi/actions";
+import { useAccount, useReadContract } from "wagmi";
 import { ArrowDownToLine, ShieldAlert } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +9,7 @@ import { useTx } from "@/hooks/use-tx";
 import { useAmountInput } from "@/hooks/use-amount-input";
 import { usdcContract, vaultContract, CONTRACTS } from "@/lib/contracts";
 import { formatTokenAmount } from "@/lib/format";
-import { isWithinSlippageTolerance } from "@/lib/slippage";
+import { applySlippageTolerance, makeDeadline } from "@/lib/slippage";
 
 export function DepositForm({
   usdcDecimals,
@@ -28,13 +25,11 @@ export function DepositForm({
   onSuccess: () => void;
 }) {
   const { address } = useAccount();
-  const config = useConfig();
   const { run, isPending } = useTx();
-  const [isCheckingPrice, setIsCheckingPrice] = useState(false);
   const { rawAmount, setRawAmount, amount, isValid, exceedsBalance, setMax, reset } =
     useAmountInput(usdcDecimals, usdcBalance);
 
-  const { data: previewShares, refetch: refetchPreviewShares } = useReadContract({
+  const { data: previewShares } = useReadContract({
     ...vaultContract,
     functionName: "convertToShares",
     args: [amount ?? 0n],
@@ -69,31 +64,14 @@ export function DepositForm({
     if (!isValid || !address || assetMismatch) return;
     if (previewShares === undefined) return;
 
-    setIsCheckingPrice(true);
-    try {
-      // Không có minOut ở cấp contract (xem lib/slippage.ts) -> đọc lại convertToShares
-      // ngay trước khi ký để bắt trường hợp share price đã đổi kể từ lúc user xem preview.
-      const freshShares = (await readContract(config, {
-        ...vaultContract,
-        functionName: "convertToShares",
-        args: [amount],
-      })) as bigint;
-
-      if (!isWithinSlippageTolerance(previewShares as bigint, freshShares)) {
-        toast.error("Share price changed since you last checked", {
-          description: "Please review the updated amount below and confirm again.",
-        });
-        refetchPreviewShares();
-        return;
-      }
-    } finally {
-      setIsCheckingPrice(false);
-    }
-
+    // Vault Security Audit - High: `depositWithMinShares` tự check minOut/deadline ngay
+    // on-chain trong cùng transaction (atomic) - không cần đọc lại giá thủ công ở
+    // client nữa như trước, và không có khoảng hở thời gian giữa lần đọc cuối và lúc ký.
+    const minShares = applySlippageTolerance(previewShares as bigint);
     const receipt = await run("Deposit", {
       ...vaultContract,
-      functionName: "deposit",
-      args: [amount, address],
+      functionName: "depositWithMinShares",
+      args: [amount, address, minShares, makeDeadline()],
     });
     if (receipt) {
       reset();
@@ -101,7 +79,7 @@ export function DepositForm({
     }
   };
 
-  const disabled = !isValid || exceedsBalance || isPending || isCheckingPrice || assetMismatch;
+  const disabled = !isValid || exceedsBalance || isPending || assetMismatch;
 
   return (
     <div className="flex flex-col gap-4">

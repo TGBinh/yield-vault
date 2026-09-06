@@ -30,6 +30,14 @@ contract Vault is ERC4626, AccessControl, Pausable, ReentrancyGuard {
 
     bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
 
+    /// @notice Vault Security Audit - High: chuẩn ERC-4626 deposit()/redeem() không có
+    /// tham số min-output, nên slippage giữa lúc user gửi tx và lúc mine (rebalance chạy
+    /// giữa chừng, MEV sandwich) không thể chặn được ở tầng contract. `deposit()`/
+    /// `redeem()` giữ nguyên chuẩn (tương thích ví/tool ERC-4626 khác), 2 hàm dưới đây là
+    /// entrypoint bổ sung có `minOut`/`deadline` thật sự on-chain cho ai cần bảo vệ chặt.
+    error SlippageExceeded(uint256 actual, uint256 min);
+    error DeadlineExpired(uint256 deadline, uint256 currentTimestamp);
+
     IStrategyManager public strategyManager;
 
     event StrategyManagerSet(address indexed strategyManager);
@@ -99,6 +107,38 @@ contract Vault is ERC4626, AccessControl, Pausable, ReentrancyGuard {
         returns (uint256)
     {
         return super.redeem(shares, receiver, owner_);
+    }
+
+    /// @notice Giống `deposit()` nhưng revert nếu số share nhận được < `minShares` hoặc
+    /// đã quá `deadline` - bảo vệ slippage thật ở cấp contract (atomic: nếu điều kiện
+    /// không đạt, toàn bộ effect của deposit bị rollback cùng transaction, không chỉ riêng
+    /// check này). Gọi `super.deposit()` (không phải `this.deposit()`) để tránh xung đột
+    /// với khoá `nonReentrant` đã giữ ở hàm này - `_deposit()` vẫn được dispatch ảo đúng
+    /// override của Vault (chuyển tiền vào StrategyManager) như đường `deposit()` chuẩn.
+    function depositWithMinShares(uint256 assets, address receiver, uint256 minShares, uint256 deadline)
+        external
+        whenNotPaused
+        nonReentrant
+        returns (uint256 shares)
+    {
+        if (block.timestamp > deadline) revert DeadlineExpired(deadline, block.timestamp);
+        shares = super.deposit(assets, receiver);
+        if (shares < minShares) revert SlippageExceeded(shares, minShares);
+    }
+
+    /// @notice Giống `redeem()` nhưng revert nếu số asset nhận được < `minAssets` hoặc đã
+    /// quá `deadline`. Không có `whenNotPaused` - đúng nguyên tắc "pause không bao giờ
+    /// chặn rút vốn" đã ghi ở đầu file, giống `redeem()`/`withdraw()` chuẩn.
+    function redeemWithMinAssets(
+        uint256 shares,
+        address receiver,
+        address owner_,
+        uint256 minAssets,
+        uint256 deadline
+    ) external nonReentrant returns (uint256 assets) {
+        if (block.timestamp > deadline) revert DeadlineExpired(deadline, block.timestamp);
+        assets = super.redeem(shares, receiver, owner_);
+        if (assets < minAssets) revert SlippageExceeded(assets, minAssets);
     }
 
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares)

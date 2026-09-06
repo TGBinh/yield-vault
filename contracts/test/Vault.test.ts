@@ -82,6 +82,86 @@ describe("Vault (Phase 2)", () => {
     });
   });
 
+  describe("depositWithMinShares / redeemWithMinAssets (slippage protection)", () => {
+    it("depositWithMinShares succeeds and mints the expected shares when slippage tolerance is met", async () => {
+      const { alice, vault } = await loadFixture(deployFixture);
+      const amount = 1_000n * ONE_USDC;
+      const deadline = (await time.latest()) + 3600;
+
+      await expect(vault.connect(alice).depositWithMinShares(amount, alice.address, amount, deadline)).to.not
+        .be.reverted;
+      expect(await vault.balanceOf(alice.address)).to.equal(amount);
+    });
+
+    it("depositWithMinShares reverts with SlippageExceeded if minShares can't be met", async () => {
+      const { alice, vault } = await loadFixture(deployFixture);
+      const amount = 1_000n * ONE_USDC;
+      const deadline = (await time.latest()) + 3600;
+      const unrealisticMinShares = amount + 1n; // first deposit is always 1:1, can never exceed it
+
+      await expect(
+        vault.connect(alice).depositWithMinShares(amount, alice.address, unrealisticMinShares, deadline)
+      ).to.be.revertedWithCustomError(vault, "SlippageExceeded");
+      // Vault Security Audit: revert phải rollback toàn bộ effect của deposit (atomic),
+      // không chỉ riêng check slippage - xác nhận không có gì bị mint/transfer.
+      expect(await vault.balanceOf(alice.address)).to.equal(0);
+      expect(await vault.totalAssets()).to.equal(0);
+    });
+
+    it("depositWithMinShares reverts with DeadlineExpired if the deadline has passed", async () => {
+      const { alice, vault } = await loadFixture(deployFixture);
+      const amount = 1_000n * ONE_USDC;
+      const expiredDeadline = (await time.latest()) - 1;
+
+      await expect(
+        vault.connect(alice).depositWithMinShares(amount, alice.address, amount, expiredDeadline)
+      ).to.be.revertedWithCustomError(vault, "DeadlineExpired");
+    });
+
+    it("redeemWithMinAssets succeeds and returns the expected assets when slippage tolerance is met", async () => {
+      const { alice, vault, usdc } = await loadFixture(deployFixture);
+      const amount = 1_000n * ONE_USDC;
+      await vault.connect(alice).deposit(amount, alice.address);
+      const deadline = (await time.latest()) + 3600;
+
+      const balanceBefore = await usdc.balanceOf(alice.address);
+      await expect(
+        vault
+          .connect(alice)
+          .redeemWithMinAssets(await vault.balanceOf(alice.address), alice.address, alice.address, amount, deadline)
+      ).to.not.be.reverted;
+      expect(await usdc.balanceOf(alice.address) - balanceBefore).to.equal(amount);
+    });
+
+    it("redeemWithMinAssets reverts with SlippageExceeded if minAssets can't be met, rolling back the burn", async () => {
+      const { alice, vault } = await loadFixture(deployFixture);
+      const amount = 1_000n * ONE_USDC;
+      await vault.connect(alice).deposit(amount, alice.address);
+      const deadline = (await time.latest()) + 3600;
+      const shares = await vault.balanceOf(alice.address);
+      const unrealisticMinAssets = amount + 1n; // no yield has accrued yet, can't exceed principal
+
+      await expect(
+        vault.connect(alice).redeemWithMinAssets(shares, alice.address, alice.address, unrealisticMinAssets, deadline)
+      ).to.be.revertedWithCustomError(vault, "SlippageExceeded");
+      expect(await vault.balanceOf(alice.address)).to.equal(shares); // shares NOT burned
+    });
+
+    it("redeemWithMinAssets is NOT blocked by pause() - same withdraw-always-available guarantee as redeem()", async () => {
+      const { admin, alice, vault } = await loadFixture(deployFixture);
+      const amount = 1_000n * ONE_USDC;
+      await vault.connect(alice).deposit(amount, alice.address);
+      await vault.connect(admin).pause();
+      const deadline = (await time.latest()) + 3600;
+
+      await expect(
+        vault
+          .connect(alice)
+          .redeemWithMinAssets(await vault.balanceOf(alice.address), alice.address, alice.address, 0n, deadline)
+      ).to.not.be.reverted;
+    });
+  });
+
   describe("access control & pause", () => {
     it("only GUARDIAN_ROLE can pause", async () => {
       const { alice, vault } = await loadFixture(deployFixture);
