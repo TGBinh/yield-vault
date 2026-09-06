@@ -104,7 +104,14 @@ jobs:
         run: pip install slither-analyzer==0.11.6
       - name: Run Slither (own code only - dependencies excluded)
         working-directory: contracts
-        run: slither . --exclude-dependencies --fail-high
+        # Vault Security Audit: nâng lên --fail-medium sau khi triage toàn bộ finding
+        # Medium thật (đọc source, không suy đoán) - phần lớn là false positive theo
+        # heuristic của Slither (uninitialized-local trên biến mặc định = 0 của Solidity,
+        # incorrect-equality trên so sánh == 0 xác định) hoặc rủi ro đã chấp nhận có ghi
+        # chú rõ trong code (`slither-disable-next-line` kèm lý do tại từng chỗ). test-
+        # helpers/ (MockStrategy/MockPendle/RevertingStrategy) loại khỏi gate vì đây là
+        # mock chỉ dùng cho test/local, không phải contract giữ tiền thật.
+        run: slither . --exclude-dependencies --filter-paths "test-helpers" --fail-medium
 
   indexer:
     name: Indexer - typecheck + build

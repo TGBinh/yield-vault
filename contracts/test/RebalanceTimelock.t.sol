@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {RebalanceTimelock} from "../src/RebalanceTimelock.sol";
 import {StrategyManager} from "../src/StrategyManager.sol";
 import {MockUSDC} from "../src/MockUSDC.sol";
-import {MockStrategy} from "../src/MockStrategy.sol";
+import {MockStrategy} from "../src/test-helpers/MockStrategy.sol";
 import {Vault} from "../src/Vault.sol";
 
 /// @notice Vault Readiness Report - Phase 0: verify khong con cach nao rebalance co hieu

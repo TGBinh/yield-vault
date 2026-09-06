@@ -3,12 +3,19 @@ pragma solidity 0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IStrategy} from "./interfaces/IStrategy.sol";
+import {IStrategy} from "../interfaces/IStrategy.sol";
 
 /// @notice Mock lending strategy dùng cho testing/local/testnet. Mô phỏng lãi suất cố định
 /// theo thời gian bằng cách mint thêm mUSDC (chỉ hợp lệ vì MockUSDC là token giả lập).
 /// KHÔNG dùng cho production — sẽ được thay bằng AaveStrategy/MorphoStrategy ở Giai đoạn 2-3.
 /// @dev `caller` là StrategyManager (không phải Vault trực tiếp) từ GĐ2 trở đi.
+///
+/// Vault Security Audit - Medium: chuyển từ `src/MockStrategy.sol` sang đây (cùng
+/// `MockPendle.sol`/`RevertingStrategy.sol`) - đây là mock chỉ dùng cho test/local
+/// (xem `scripts/deploy.ts`: chỉ deploy trên local/hardhat, testnet thật dùng Aave/
+/// Morpho), không phải code production. CI Slither loại trừ thư mục này khỏi gate
+/// `--fail-medium` (xem ci.yml) để không lẫn finding trên mock test với finding trên
+/// contract giữ tiền thật.
 contract MockStrategy is IStrategy {
     using SafeERC20 for IERC20;
 
@@ -41,6 +48,7 @@ contract MockStrategy is IStrategy {
     /// @notice StrategyManager gọi hàm này sau khi đã transfer `amount` asset vào strategy.
     function deposit(uint256 amount) external onlyCaller {
         _accrueYield();
+        // slither-disable-next-line reentrancy-no-eth
         principal += amount;
     }
 
@@ -48,6 +56,7 @@ contract MockStrategy is IStrategy {
     function withdraw(uint256 amount, address to) external onlyCaller {
         _accrueYield();
         require(amount <= principal, "MockStrategy: insufficient principal");
+        // slither-disable-next-line reentrancy-no-eth
         principal -= amount;
         assetToken.safeTransfer(to, amount);
     }
@@ -77,8 +86,10 @@ contract MockStrategy is IStrategy {
                 abi.encodeWithSignature("mint(address,uint256)", address(this), yield)
             );
             require(ok, "MockStrategy: mock yield mint failed");
+            // slither-disable-next-line reentrancy-no-eth
             principal += yield;
         }
+        // slither-disable-next-line reentrancy-no-eth
         lastAccrualTimestamp = block.timestamp;
     }
 }

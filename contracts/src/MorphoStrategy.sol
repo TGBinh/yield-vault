@@ -96,11 +96,17 @@ contract MorphoStrategy is IStrategy {
     /// @notice StrategyManager đã transfer `amount` asset vào strategy trước khi gọi.
     function deposit(uint256 amount) external onlyCaller {
         assetToken.forceApprove(address(morpho), amount);
+        // Giá trị thứ 2 (sharesSupplied) là kế toán share nội bộ của Morpho - strategy
+        // này không cần theo dõi share, chỉ cần biết đúng số asset đã supply nên bỏ qua
+        // có chủ đích, không phải quên.
+        // slither-disable-next-line unused-return
         (uint256 assetsSupplied,) = morpho.supply(_params(), amount, 0, address(this), "");
         if (assetsSupplied != amount) revert UnexpectedMorphoSupplyAmount();
     }
 
     function withdraw(uint256 amount, address to) external onlyCaller {
+        // Tương tự deposit() ở trên - sharesWithdrawn không cần thiết cho strategy này.
+        // slither-disable-next-line unused-return
         (uint256 assetsWithdrawn,) = morpho.withdraw(_params(), amount, 0, address(this), to);
         if (assetsWithdrawn != amount) revert UnexpectedMorphoWithdrawAmount();
     }

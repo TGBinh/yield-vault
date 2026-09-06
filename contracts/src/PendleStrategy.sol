@@ -84,6 +84,7 @@ contract PendleStrategy is IStrategy {
         // Không set field nào - đúng bằng `createEmptyLimitOrderData()` chính thức của
         // Pendle (không dùng limit order), Slither báo "uninitialized local variable"
         // nhưng đây là giá trị mặc định CÓ CHỦ ĐÍCH, không phải quên khởi tạo.
+        // slither-disable-next-line uninitialized-local
         LimitOrderData memory limit;
 
         // minPtOut = 0: KHÔNG có bảo vệ trượt giá ở bản v1 này (chấp nhận rủi ro để giữ
@@ -92,6 +93,7 @@ contract PendleStrategy is IStrategy {
         // cần kiểm soát việc này chặt hơn.
         // netPtOut trả về KHÔNG được assert bằng `amount` như Aave/Morpho - PT là 1 token
         // khác, giao dịch chiết khấu so với asset gốc, không bao giờ 1:1.
+        // slither-disable-next-line unused-return
         router.swapExactTokenForPt(address(this), market, 0, approx, input, limit);
     }
 
@@ -114,6 +116,7 @@ contract PendleStrategy is IStrategy {
 
         // netTokenOut cũng không assert bằng `amount` - dù PT redeem ~1:1 về SY tại đáo
         // hạn, bước SY→asset cuối có thể lệch vài đơn vị do cách quy đổi của SY cụ thể.
+        // slither-disable-next-line unused-return
         router.redeemPyToToken(to, yt, amount, output);
     }
 

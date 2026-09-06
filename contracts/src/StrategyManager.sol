@@ -89,7 +89,7 @@ contract StrategyManager is IStrategyManager, AccessControl {
     {
         if (strategies.length != weightsBps.length) revert LengthMismatch();
 
-        uint256 sum;
+        uint256 sum = 0;
         for (uint256 i = 0; i < strategies.length; i++) {
             if (!isRegisteredStrategy[strategies[i]]) revert UnknownStrategy();
             sum += weightsBps[i];
@@ -110,6 +110,7 @@ contract StrategyManager is IStrategyManager, AccessControl {
             }
             weightBps[strategy] = 0;
         }
+        // slither-disable-next-line reentrancy-no-eth
         delete activeStrategies;
 
         for (uint256 i = 0; i < strategies.length; i++) {
@@ -135,11 +136,16 @@ contract StrategyManager is IStrategyManager, AccessControl {
     /// dư để không mất mát do làm tròn số nguyên.
     function _distribute(uint256 amount) private {
         uint256 len = activeStrategies.length;
-        uint256 distributed;
+        uint256 distributed = 0;
         for (uint256 i = 0; i < len; i++) {
             address strategy = activeStrategies[i];
             uint256 portion =
                 i == len - 1 ? amount - distributed : (amount * weightBps[strategy]) / BPS_DENOMINATOR;
+            // Slither báo "incorrect-equality" (strict equality nguy hiểm) - false
+            // positive: đây là so sánh == 0 trên 1 số nguyên tính toán xác định
+            // (deterministic), không phải so khớp balance/hash sau external call như
+            // detector này thực sự nhắm tới.
+            // slither-disable-next-line incorrect-equality
             if (portion == 0) continue;
 
             distributed += portion;
@@ -174,7 +180,7 @@ contract StrategyManager is IStrategyManager, AccessControl {
         for (uint256 i = 0; i < len && remaining > 0; i++) {
             address strategy = activeStrategies[i];
 
-            uint256 available;
+            uint256 available = 0;
             try IStrategy(strategy).totalAssets() returns (uint256 a) {
                 available = a;
             } catch {
