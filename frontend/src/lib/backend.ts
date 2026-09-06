@@ -1,5 +1,9 @@
+import { assertHttpsInProduction } from "@/lib/env-guard";
+
 export const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3001";
+
+assertHttpsInProduction("Backend URL", BACKEND_URL);
 
 export type VaultSummary = {
   totalDeposited: string;
@@ -45,7 +49,9 @@ export function fetchVaultSummary(): Promise<VaultSummary> {
 }
 
 export function fetchUserPositions(address: string): Promise<UserPositions> {
-  return fetchJson<UserPositions>(`/user/${address}/positions`);
+  // Vault Security Audit: address hiện luôn đến từ useAccount() (hex hợp lệ), nhưng
+  // encode để phòng thủ tầng sâu - không tin ngầm định câu chuyện "nguồn luôn sạch".
+  return fetchJson<UserPositions>(`/user/${encodeURIComponent(address)}/positions`);
 }
 
 export type AllocationSuggestion = {

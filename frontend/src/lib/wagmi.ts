@@ -2,6 +2,9 @@ import { createConfig, http } from "wagmi";
 import { injected } from "wagmi/connectors";
 import { defineChain } from "viem";
 import deployments from "@/lib/deployments.local.json";
+import { assertHttpsInProduction } from "@/lib/env-guard";
+
+assertHttpsInProduction("RPC URL", deployments.rpcUrl);
 
 export const hardhatLocal = defineChain({
   id: deployments.chainId,

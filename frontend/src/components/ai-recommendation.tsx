@@ -6,6 +6,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useLatestRecommendation } from "@/hooks/use-backend-positions";
 
+// Vault Security Audit - Low: explanation/riskFlags là văn bản AI-generated, không có
+// giới hạn độ dài (ai-engine lỗi/bị thao túng có thể trả về chuỗi khổng lồ làm phình
+// layout) và không có nhãn cảnh báo cho user biết đây không phải dữ liệu đã xác thực
+// tuyệt đối - quyết định thật vẫn nằm ở Policy Engine verdict hiển thị riêng bên dưới.
+const MAX_AI_TEXT_LENGTH = 500;
+
+function truncateAiText(text: string): string {
+  if (text.length <= MAX_AI_TEXT_LENGTH) return text;
+  return `${text.slice(0, MAX_AI_TEXT_LENGTH)}...`;
+}
+
 /**
  * Phase 4 dashboard panel: shows the full Risk/Optimization Engine -> AI Engine ->
  * Policy Engine chain and its verdict. The `explanation` text is display-only - what
@@ -58,13 +69,16 @@ export function AiRecommendation() {
               ))}
             </ul>
 
-            <p className="text-sm text-muted">{data.recommendation.explanation}</p>
+            <div className="space-y-1">
+              <p className="text-sm text-muted">{truncateAiText(data.recommendation.explanation)}</p>
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted/70">AI-generated - not verified</p>
+            </div>
 
             {data.recommendation.riskFlags.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {data.recommendation.riskFlags.map((flag) => (
                   <Badge key={flag} variant="negative">
-                    {flag}
+                    {truncateAiText(flag)}
                   </Badge>
                 ))}
               </div>

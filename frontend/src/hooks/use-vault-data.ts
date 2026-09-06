@@ -1,6 +1,7 @@
 "use client";
 
 import { useAccount, useReadContracts } from "wagmi";
+import { zeroAddress } from "viem";
 import { vaultContract, usdcContract, CONTRACTS } from "@/lib/contracts";
 
 /**
@@ -16,12 +17,12 @@ export function useVaultData() {
     contracts: [
       { ...usdcContract, functionName: "decimals" },
       { ...vaultContract, functionName: "decimals" },
-      { ...usdcContract, functionName: "balanceOf", args: [address ?? "0x0"] },
-      { ...vaultContract, functionName: "balanceOf", args: [address ?? "0x0"] },
+      { ...usdcContract, functionName: "balanceOf", args: [address ?? zeroAddress] },
+      { ...vaultContract, functionName: "balanceOf", args: [address ?? zeroAddress] },
       {
         ...usdcContract,
         functionName: "allowance",
-        args: [address ?? "0x0", CONTRACTS.vault],
+        args: [address ?? zeroAddress, CONTRACTS.vault],
       },
       { ...vaultContract, functionName: "totalAssets" },
       { ...vaultContract, functionName: "totalSupply" },

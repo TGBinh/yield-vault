@@ -1,14 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useAccount, useReadContract } from "wagmi";
+import { useState } from "react";
+import { useAccount, useConfig, useReadContract } from "wagmi";
+import { readContract } from "wagmi/actions";
 import { ArrowUpFromLine } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTx } from "@/hooks/use-tx";
+import { useAmountInput } from "@/hooks/use-amount-input";
 import { vaultContract } from "@/lib/contracts";
-import { formatTokenAmount, parseTokenAmount, toRawAmountString } from "@/lib/format";
+import { formatTokenAmount } from "@/lib/format";
+import { isWithinSlippageTolerance } from "@/lib/slippage";
 
 export function WithdrawForm({
   usdcDecimals,
@@ -22,45 +26,56 @@ export function WithdrawForm({
   onSuccess: () => void;
 }) {
   const { address } = useAccount();
+  const config = useConfig();
   const { run, isPending } = useTx();
-  const [rawAmount, setRawAmount] = useState("");
+  const [isCheckingPrice, setIsCheckingPrice] = useState(false);
+  const { rawAmount, setRawAmount, amount: shares, isValid, exceedsBalance, setMax, reset } =
+    useAmountInput(shareDecimals, shareBalance);
 
-  const shares = useMemo(() => {
-    try {
-      return rawAmount ? parseTokenAmount(rawAmount, shareDecimals) : 0n;
-    } catch {
-      return null;
-    }
-  }, [rawAmount, shareDecimals]);
-
-  const { data: previewAssets } = useReadContract({
+  const { data: previewAssets, refetch: refetchPreviewAssets } = useReadContract({
     ...vaultContract,
     functionName: "convertToAssets",
     args: [shares ?? 0n],
     query: { enabled: !!shares && shares > 0n },
   });
 
-  const isValid = shares !== null && shares > 0n;
-  const exceedsBalance = isValid && shareBalance !== undefined && shares > shareBalance;
-
-  const handleMax = () => {
-    if (shareBalance !== undefined) {
-      setRawAmount(toRawAmountString(shareBalance, shareDecimals));
-    }
-  };
-
   const handleRedeem = async () => {
     if (!isValid || !address) return;
+    if (previewAssets === undefined) return;
+
+    setIsCheckingPrice(true);
+    try {
+      // Không có minOut ở cấp contract (xem lib/slippage.ts) -> đọc lại convertToAssets
+      // ngay trước khi ký để bắt trường hợp share price đã đổi kể từ lúc user xem preview.
+      const freshAssets = (await readContract(config, {
+        ...vaultContract,
+        functionName: "convertToAssets",
+        args: [shares],
+      })) as bigint;
+
+      if (!isWithinSlippageTolerance(previewAssets as bigint, freshAssets)) {
+        toast.error("Share price changed since you last checked", {
+          description: "Please review the updated amount below and confirm again.",
+        });
+        refetchPreviewAssets();
+        return;
+      }
+    } finally {
+      setIsCheckingPrice(false);
+    }
+
     const receipt = await run("Withdraw", {
       ...vaultContract,
       functionName: "redeem",
       args: [shares, address, address],
     });
     if (receipt) {
-      setRawAmount("");
+      reset();
       onSuccess();
     }
   };
+
+  const disabled = !isValid || exceedsBalance || isPending || isCheckingPrice;
 
   return (
     <div className="flex flex-col gap-4">
@@ -69,7 +84,7 @@ export function WithdrawForm({
           <Label htmlFor="withdraw-amount">Amount (yvUSDC shares)</Label>
           <button
             type="button"
-            onClick={handleMax}
+            onClick={setMax}
             className="text-xs font-medium text-accent hover:underline"
           >
             Balance: {formatTokenAmount(shareBalance, shareDecimals)} — Max
@@ -96,11 +111,7 @@ export function WithdrawForm({
         </span>
       </div>
 
-      <Button
-        variant="outline"
-        onClick={handleRedeem}
-        disabled={!isValid || exceedsBalance || isPending}
-      >
+      <Button variant="outline" onClick={handleRedeem} disabled={disabled}>
         <ArrowUpFromLine />
         Withdraw
       </Button>

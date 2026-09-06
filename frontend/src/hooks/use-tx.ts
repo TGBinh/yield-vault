@@ -15,15 +15,30 @@ type WriteArgs = {
   args?: readonly unknown[];
 };
 
-function parseErrorMessage(error: unknown): string {
+// Vault Security Audit - Medium: raw RPC/viem error message trước đây hiện thẳng ra
+// toast - vừa khó hiểu với user thường (jargon "execution reverted", nonce, gas...)
+// vừa có thể rò rỉ chi tiết nội bộ (địa chỉ contract, revert data). Map về vài message
+// thân thiện cố định; raw error vẫn log ra console để debug.
+const USER_REJECTED_PATTERNS = ["user rejected", "user denied", "rejected the request"];
+
+function toFriendlyMessage(error: unknown): string {
+  console.error(error);
+  let raw = "";
   if (error && typeof error === "object") {
     const shortMessage = (error as { shortMessage?: string }).shortMessage;
-    if (shortMessage) return shortMessage;
     const message = (error as { message?: string }).message;
-    if (message) return message.split("\n")[0];
+    raw = (shortMessage ?? message ?? "").toLowerCase();
   }
-  return "Transaction failed";
+  if (USER_REJECTED_PATTERNS.some((pattern) => raw.includes(pattern))) {
+    return "Transaction was rejected in your wallet.";
+  }
+  return "Transaction failed. Please try again.";
 }
+
+// Vault Security Audit - Medium: waitForTransactionReceipt mặc định chờ vô hạn - nếu tx
+// bị drop khỏi mempool (thay vì revert), toast "waiting for confirmation" treo mãi. Đặt
+// timeout hợp lý; viem tự throw WaitForTransactionReceiptTimeoutError khi hết hạn.
+const RECEIPT_TIMEOUT_MS = 3 * 60 * 1000;
 
 /**
  * Runs a single on-chain write with explicit pending/success/error toast
@@ -48,7 +63,10 @@ export function useTx() {
           id: toastId,
           description: shortenAddress(hash, 6),
         });
-        const receipt = await waitForTransactionReceipt(config, { hash });
+        const receipt = await waitForTransactionReceipt(config, {
+          hash,
+          timeout: RECEIPT_TIMEOUT_MS,
+        });
         if (receipt.status === "reverted") {
           toast.error(`${label} reverted`, { id: toastId });
           return null;
@@ -61,7 +79,7 @@ export function useTx() {
       } catch (error) {
         toast.error(`${label} failed`, {
           id: toastId,
-          description: parseErrorMessage(error),
+          description: toFriendlyMessage(error),
         });
         return null;
       } finally {
