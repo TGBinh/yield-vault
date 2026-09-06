@@ -20,6 +20,14 @@ contract MorphoStrategy is IStrategy {
 
     error OnlyCaller();
     error ZeroAddress();
+    /// @notice Morpho.supply() tra ve so assets khac amount da chuyen vao - hanh vi
+    /// bat thuong cua protocol ngoai, khong phai bug noi bo, nen dung custom error
+    /// thay vi assert() (assert danh cho dieu kien khong the xay ra do bug cua chinh
+    /// contract nay).
+    error UnexpectedMorphoSupplyAmount();
+    /// @notice Morpho.withdraw() tra ve so assets khac amount yeu cau rut - tuong tu
+    /// UnexpectedMorphoSupplyAmount, day la hanh vi bat thuong cua protocol ngoai.
+    error UnexpectedMorphoWithdrawAmount();
 
     uint256 private constant VIRTUAL_SHARES = 1e6;
     uint256 private constant VIRTUAL_ASSETS = 1;
@@ -89,12 +97,12 @@ contract MorphoStrategy is IStrategy {
     function deposit(uint256 amount) external onlyCaller {
         assetToken.forceApprove(address(morpho), amount);
         (uint256 assetsSupplied,) = morpho.supply(_params(), amount, 0, address(this), "");
-        assert(assetsSupplied == amount);
+        if (assetsSupplied != amount) revert UnexpectedMorphoSupplyAmount();
     }
 
     function withdraw(uint256 amount, address to) external onlyCaller {
         (uint256 assetsWithdrawn,) = morpho.withdraw(_params(), amount, 0, address(this), to);
-        assert(assetsWithdrawn == amount);
+        if (assetsWithdrawn != amount) revert UnexpectedMorphoWithdrawAmount();
     }
 
     function asset() external view returns (address) {

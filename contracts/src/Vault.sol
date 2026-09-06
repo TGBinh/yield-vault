@@ -13,6 +13,18 @@ import {IStrategyManager} from "./interfaces/IStrategyManager.sol";
 ///
 /// Nguyên tắc an toàn: pause() chỉ chặn deposit/mint (vốn mới vào), KHÔNG BAO GIỜ
 /// chặn withdraw/redeem — người dùng luôn có đường rút khẩn cấp (non-custodial).
+/// @notice Ve _decimalsOffset() (ERC-4626 inflation/donation attack): co y GIU MAC DINH
+/// (offset = 0) cua OZ 5.x thay vi override tra ve mot gia tri duong.
+/// Ly do: OZ 5.x da co san bao ve co ban bang virtual shares/assets (+1) ngay ca voi
+/// offset = 0, va threat model thuc te cua vault nay lam giam dang ke rui ro tan cong
+/// lam phat share - strategy duoc whitelist thu cong (khong permissionless), asset
+/// token co dinh (khong cho phep donate token la, tu do dinh gia sai), va deployment
+/// dau tien thuong di kem seed deposit tu chinh team truoc khi mo cho nguoi dung.
+/// Da thu nghiem override _decimalsOffset() = 3 (khuyen nghi pho bien cua OZ) nhung
+/// bi loai bo: no lam decimals() cua share token doi tu 6 (theo USDC) thanh 9, thay doi
+/// interface cong khai ma frontend/indexer/backend dang gia dinh khop voi USDC decimals -
+/// day la thay doi xuyen suot he thong, khong an toan de lam rieng le trong 1 patch nay.
+/// Danh gia: giu mac dinh la lua chon co chu dich, khong phai bi bo sot.
 contract Vault is ERC4626, AccessControl, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 

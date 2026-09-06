@@ -15,6 +15,10 @@ contract AaveStrategy is IStrategy {
 
     error OnlyCaller();
     error ZeroAddress();
+    /// @notice Aave Pool.withdraw() tra ve so luong khac amount yeu cau - day la
+    /// hanh vi bat thuong cua protocol ngoai (vi du do nang cap/thay doi logic),
+    /// khong phai bug noi bo cua contract nay nen dung custom error thay vi assert().
+    error UnexpectedAaveWithdrawAmount();
 
     IERC20 public immutable assetToken;
     IERC20 public immutable aToken;
@@ -44,7 +48,7 @@ contract AaveStrategy is IStrategy {
 
     function withdraw(uint256 amount, address to) external onlyCaller {
         uint256 withdrawn = pool.withdraw(address(assetToken), amount, to);
-        assert(withdrawn == amount);
+        if (withdrawn != amount) revert UnexpectedAaveWithdrawAmount();
     }
 
     function asset() external view returns (address) {
