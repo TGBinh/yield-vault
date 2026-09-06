@@ -325,6 +325,19 @@
     "inputs": [
       {
         "indexed": false,
+        "internalType": "uint256",
+        "name": "newCap",
+        "type": "uint256"
+      }
+    ],
+    "name": "DepositCapUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
         "internalType": "address",
         "name": "account",
         "type": "address"
@@ -678,6 +691,19 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "depositCap",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -795,7 +821,7 @@
     "inputs": [
       {
         "internalType": "address",
-        "name": "",
+        "name": "receiver",
         "type": "address"
       }
     ],
@@ -1081,6 +1107,19 @@
       }
     ],
     "name": "revokeRole",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "newCap",
+        "type": "uint256"
+      }
+    ],
+    "name": "setDepositCap",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

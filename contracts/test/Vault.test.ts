@@ -162,6 +162,50 @@ describe("Vault (Phase 2)", () => {
     });
   });
 
+  describe("depositCap (TVL cap)", () => {
+    it("defaults to uncapped (type(uint256).max) - no behavior change for existing deployments", async () => {
+      const { vault } = await loadFixture(deployFixture);
+      expect(await vault.depositCap()).to.equal(ethers.MaxUint256);
+    });
+
+    it("rejects a deposit that would push totalAssets over the cap", async () => {
+      const { admin, alice, vault } = await loadFixture(deployFixture);
+      const cap = 1_000n * ONE_USDC;
+      await vault.connect(admin).setDepositCap(cap);
+
+      await expect(vault.connect(alice).deposit(cap + 1n, alice.address)).to.be.reverted;
+      await expect(vault.connect(alice).deposit(cap, alice.address)).to.not.be.reverted;
+    });
+
+    it("also caps depositWithMinShares via the same maxDeposit hook", async () => {
+      const { admin, alice, vault } = await loadFixture(deployFixture);
+      const cap = 1_000n * ONE_USDC;
+      await vault.connect(admin).setDepositCap(cap);
+      const deadline = (await time.latest()) + 3600;
+
+      await expect(
+        vault.connect(alice).depositWithMinShares(cap + 1n, alice.address, 0n, deadline)
+      ).to.be.reverted;
+    });
+
+    it("a full cap allows a second depositor's deposit to be rejected while the first one's withdrawal is never blocked", async () => {
+      const { admin, alice, bob, vault } = await loadFixture(deployFixture);
+      const cap = 1_000n * ONE_USDC;
+      await vault.connect(admin).setDepositCap(cap);
+      await vault.connect(alice).deposit(cap, alice.address);
+
+      await expect(vault.connect(bob).deposit(1n, bob.address)).to.be.reverted;
+      await expect(
+        vault.connect(alice).redeem(await vault.balanceOf(alice.address), alice.address, alice.address)
+      ).to.not.be.reverted;
+    });
+
+    it("only DEFAULT_ADMIN_ROLE can change the cap", async () => {
+      const { alice, vault } = await loadFixture(deployFixture);
+      await expect(vault.connect(alice).setDepositCap(0n)).to.be.reverted;
+    });
+  });
+
   describe("access control & pause", () => {
     it("only GUARDIAN_ROLE can pause", async () => {
       const { alice, vault } = await loadFixture(deployFixture);

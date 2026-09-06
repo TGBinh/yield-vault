@@ -40,7 +40,16 @@ contract Vault is ERC4626, AccessControl, Pausable, ReentrancyGuard {
 
     IStrategyManager public strategyManager;
 
+    /// @notice Vault Readiness Report: giới hạn tổng vốn nhận vào (tính theo `totalAssets()`)
+    /// - biện pháp giảm thiểu rủi ro tiêu chuẩn cho giai đoạn mới ra mắt (chưa audit thuê
+    /// ngoài/bug bounty), giới hạn thiệt hại tối đa nếu có lỗ hổng chưa phát hiện. Mặc định
+    /// `type(uint256).max` (không giới hạn) để không đổi hành vi hiện có - admin hạ dần
+    /// theo tiến độ audit/vận hành thực tế. CHỈ áp dụng cho deposit/mint (qua hook chuẩn
+    /// `maxDeposit`/`maxMint` của OZ ERC4626) - không bao giờ chặn withdraw/redeem.
+    uint256 public depositCap = type(uint256).max;
+
     event StrategyManagerSet(address indexed strategyManager);
+    event DepositCapUpdated(uint256 newCap);
 
     constructor(IERC20 _asset, address admin)
         ERC20("Yield Vault Share", "yvUSDC")
@@ -48,6 +57,25 @@ contract Vault is ERC4626, AccessControl, Pausable, ReentrancyGuard {
     {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(GUARDIAN_ROLE, admin);
+    }
+
+    /// @notice Đặt lại TVL cap. `type(uint256).max` = không giới hạn.
+    function setDepositCap(uint256 newCap) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        depositCap = newCap;
+        emit DepositCapUpdated(newCap);
+    }
+
+    /// @dev Hook chuẩn của OZ ERC4626 - `deposit()`/`depositWithMinShares()` tự động check
+    /// qua hàm này (revert `ERC4626ExceededMaxDeposit` nếu vượt), không cần sửa gì thêm ở
+    /// những hàm đó.
+    function maxDeposit(address) public view override returns (uint256) {
+        uint256 currentAssets = totalAssets();
+        return currentAssets >= depositCap ? 0 : depositCap - currentAssets;
+    }
+
+    /// @dev Tương tự `maxDeposit` nhưng cho đường `mint()` (user chỉ định số share muốn có).
+    function maxMint(address receiver) public view override returns (uint256) {
+        return convertToShares(maxDeposit(receiver));
     }
 
     /// @notice Gắn StrategyManager cho vault. Chỉ gọi được 1 lần (GĐ2 chưa hỗ trợ migrate).

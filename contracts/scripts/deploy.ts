@@ -115,6 +115,19 @@ async function main() {
     );
   }
 
+  // Vault Readiness Report - Phase 1: TVL cap giới hạn thiệt hại tối đa trong giai đoạn
+  // đầu ra mắt (chưa audit thuê ngoài/bug bounty). DEPOSIT_CAP_RAW là số nguyên đơn vị
+  // nhỏ nhất của asset (USDC 6 decimals - ví dụ "1000000000" = 1000 USDC), KHÔNG tự động
+  // quy đổi đơn vị để tránh giả định sai lệch nếu sau này đổi asset. Không set = giữ mặc
+  // định uncapped (type(uint256).max) của Vault.sol.
+  const depositCapRaw = process.env.DEPOSIT_CAP_RAW;
+  if (depositCapRaw) {
+    await (await vault.setDepositCap(BigInt(depositCapRaw))).wait();
+    console.log("Vault.depositCap set to:", depositCapRaw);
+  } else {
+    console.log("DEPOSIT_CAP_RAW not set - vault stays uncapped (dev/local default).");
+  }
+
   console.log("\n--- Deploy done ---");
   console.log(JSON.stringify({
     usdc: await usdc.getAddress(),
