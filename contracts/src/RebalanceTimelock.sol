@@ -24,10 +24,10 @@ contract RebalanceTimelock is AccessControl {
     /// dashboard/on-chain event phat hien va rut von neu khong dong y voi rebalance sap toi.
     uint256 public constant MIN_DELAY = 24 hours;
 
+    /// @notice `eta == 0` nghia la khong co de xuat nao dang cho (chua tung queue, hoac
+    /// da bi xoa sau khi thuc thi/huy - xem executeRebalance/cancelRebalance).
     struct QueuedRebalance {
         uint256 eta;
-        bool executed;
-        bool canceled;
     }
 
     StrategyManager public immutable strategyManager;
@@ -54,40 +54,44 @@ contract RebalanceTimelock is AccessControl {
         require(queuedRebalances[id].eta == 0, "RebalanceTimelock: already queued");
 
         uint256 eta = block.timestamp + MIN_DELAY;
-        queuedRebalances[id] = QueuedRebalance({eta: eta, executed: false, canceled: false});
+        queuedRebalances[id] = QueuedRebalance({eta: eta});
         emit RebalanceQueued(id, strategies, weightsBps, eta);
     }
 
     /// @notice Bat ky ai cung goi duoc (permissionless theo dung tinh chat timelock) sau
     /// khi da qua `eta` - khong can multisig ky lan 2, tranh diem tap trung hoa them.
+    ///
+    /// Vault Security Audit - Medium: truoc day entry chi bi danh dau `executed=true`
+    /// chu khong bao gio bi xoa, nen `queueRebalance` voi dung tổ hợp
+    /// (strategies, weightsBps) do se revert "already queued" VINH VIEN - mot khi da
+    /// rebalance sang 1 phan bo nao do 1 lan, khong bao gio duoc phep quay lai dung phan
+    /// bo do nua. Xoa entry (CEI: xoa truoc khi goi ngoai `strategyManager`) cho phep
+    /// requeue lai cung tổ hợp do sau khi da thuc thi (phai qua lai MIN_DELAY tu dau).
     function executeRebalance(address[] calldata strategies, uint16[] calldata weightsBps) external {
         bytes32 id = _rebalanceId(strategies, weightsBps);
-        QueuedRebalance storage entry = queuedRebalances[id];
+        QueuedRebalance memory entry = queuedRebalances[id];
 
         require(entry.eta != 0, "RebalanceTimelock: not queued");
-        require(!entry.executed, "RebalanceTimelock: already executed");
-        require(!entry.canceled, "RebalanceTimelock: canceled");
         require(block.timestamp >= entry.eta, "RebalanceTimelock: too early");
 
-        entry.executed = true;
+        delete queuedRebalances[id];
         strategyManager.setAllocations(strategies, weightsBps);
         emit RebalanceExecuted(id);
     }
 
     /// @notice Multisig huy 1 de xuat truoc khi thuc thi - dung khi phat hien de xuat sai
-    /// hoac khong con phu hop trong luc cho het delay.
+    /// hoac khong con phu hop trong luc cho het delay. Xoa entry ngay sau khi huy de cho
+    /// phep de xuat lai (cung ly do voi executeRebalance o tren).
     function cancelRebalance(address[] calldata strategies, uint16[] calldata weightsBps)
         external
         onlyRole(PROPOSER_ROLE)
     {
         bytes32 id = _rebalanceId(strategies, weightsBps);
-        QueuedRebalance storage entry = queuedRebalances[id];
+        QueuedRebalance memory entry = queuedRebalances[id];
 
         require(entry.eta != 0, "RebalanceTimelock: not queued");
-        require(!entry.executed, "RebalanceTimelock: already executed");
-        require(!entry.canceled, "RebalanceTimelock: already canceled");
 
-        entry.canceled = true;
+        delete queuedRebalances[id];
         emit RebalanceCanceled(id);
     }
 

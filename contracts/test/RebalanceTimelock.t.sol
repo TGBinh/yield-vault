@@ -95,8 +95,35 @@ contract RebalanceTimelockTest is Test {
         vm.warp(block.timestamp + timelock.MIN_DELAY());
         timelock.executeRebalance(s, w);
 
-        vm.expectRevert("RebalanceTimelock: already executed");
+        // Vault Security Audit - Medium fix: entry bi xoa ngay sau khi thuc thi thanh
+        // cong (xem RebalanceTimelock.executeRebalance), nen lan goi thu 2 thay vi bao
+        // "already executed" se bao "not queued" - dung y muon, vi luc nay khong con gi
+        // dang cho ca.
+        vm.expectRevert("RebalanceTimelock: not queued");
         timelock.executeRebalance(s, w);
+    }
+
+    /// @notice Vault Security Audit - Medium: bug goc - truoc day entry KHONG bao gio bi
+    /// xoa sau khi thuc thi, nen de xuat lai dung tổ hợp (strategies, weightsBps) do se
+    /// revert "already queued" VINH VIEN. Fix: xoa entry ngay sau khi thuc thi thanh cong
+    /// de cho phep requeue lai (phai qua lai MIN_DELAY tu dau).
+    function test_canRequeueSameCombinationAfterExecution() public {
+        (address[] memory s, uint16[] memory w) = _strategies();
+
+        vm.startPrank(multisig);
+        timelock.queueRebalance(s, w);
+        vm.stopPrank();
+        vm.warp(block.timestamp + timelock.MIN_DELAY());
+        timelock.executeRebalance(s, w);
+
+        vm.prank(multisig);
+        timelock.queueRebalance(s, w); // khong duoc revert "already queued"
+
+        vm.warp(block.timestamp + timelock.MIN_DELAY());
+        timelock.executeRebalance(s, w);
+
+        assertEq(manager.weightBps(address(strategyA)), 6_000);
+        assertEq(manager.weightBps(address(strategyB)), 4_000);
     }
 
     function test_onlyProposerCanQueue() public {
@@ -116,9 +143,30 @@ contract RebalanceTimelockTest is Test {
         vm.prank(multisig);
         timelock.cancelRebalance(s, w);
 
+        // Vault Security Audit - Medium fix: cancel cung xoa entry (cung ly do voi
+        // execute), nen thu execute sau khi huy bao "not queued" thay vi "canceled" -
+        // ket qua cuoi (khong the thuc thi de xuat da huy) khong doi.
         vm.warp(block.timestamp + timelock.MIN_DELAY());
-        vm.expectRevert("RebalanceTimelock: canceled");
+        vm.expectRevert("RebalanceTimelock: not queued");
         timelock.executeRebalance(s, w);
+    }
+
+    /// @notice Vault Security Audit - Medium: cancel cung phai cho phep de xuat lai ngay
+    /// (khong can cho MIN_DELAY moi) vi ly do tuong tu execute o tren.
+    function test_canRequeueSameCombinationAfterCancel() public {
+        (address[] memory s, uint16[] memory w) = _strategies();
+
+        vm.startPrank(multisig);
+        timelock.queueRebalance(s, w);
+        timelock.cancelRebalance(s, w);
+        timelock.queueRebalance(s, w); // khong duoc revert "already queued"
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + timelock.MIN_DELAY());
+        timelock.executeRebalance(s, w);
+
+        assertEq(manager.weightBps(address(strategyA)), 6_000);
+        assertEq(manager.weightBps(address(strategyB)), 4_000);
     }
 
     function test_cannotQueueSameRebalanceTwiceWhilePending() public {
