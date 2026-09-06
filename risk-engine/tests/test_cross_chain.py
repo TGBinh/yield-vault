@@ -2,6 +2,9 @@
 kiểm chứng được qua test cho ít nhất 5 kịch bản chi phí-lợi ích khác nhau" - this file
 covers exactly that, plus the specific edge case DoD calls out: "lợi ích rất nhỏ -> phải
 khuyến nghị không chuyển"."""
+import pytest
+from pydantic import ValidationError
+
 from risk_engine.cross_chain import ChainOpportunity, SwitchCostEstimate, evaluate_switch
 
 ARBITRUM = ChainOpportunity(chain_id=421614, chain_name="Arbitrum Sepolia", strategy_id="aave-usdc", expected_apy=0.05, risk_score=90)
@@ -100,3 +103,39 @@ def test_payback_days_is_none_when_no_positive_improvement():
     result = evaluate_switch(ARBITRUM, candidate, position_size_usd=10_000, costs=_costs())
 
     assert result.payback_days is None
+
+
+# Vault Security Audit - Medium regression test: zero switch cost + positive yield
+# improvement means payback is IMMEDIATE (payback_days == 0.0, a valid value) - a
+# truthiness check (`if payback_days`) previously mistook 0.0 for "never pays back" and
+# both dropped it to None and omitted the "pays back in ~N days" reasoning text.
+def test_payback_days_zero_is_reported_as_immediate_not_none():
+    candidate = ChainOpportunity(chain_id=84532, chain_name="Base Sepolia", strategy_id="aave-usdc", expected_apy=0.15, risk_score=88)
+    zero_cost = SwitchCostEstimate(gas_cost_usd=0, bridge_fee_usd=0, slippage_usd=0, execution_cost_usd=0, risk_premium_usd=0)
+
+    result = evaluate_switch(ARBITRUM, candidate, position_size_usd=100_000, costs=zero_cost)
+
+    assert result.should_switch is True
+    assert result.payback_days == 0.0
+    assert "pays back in ~0 days" in result.reasoning
+
+
+# Vault Security Audit - High regression test: `expected_apy` previously had no upper
+# bound, so a value like 1e400 (parsed by Python's float() as `inf`) would flow all the
+# way into a JSON response as an invalid `Infinity` token.
+def test_expected_apy_rejects_values_beyond_upper_bound():
+    with pytest.raises(ValidationError):
+        ChainOpportunity(
+            chain_id=84532, chain_name="Base Sepolia", strategy_id="aave-usdc", expected_apy=1e400, risk_score=88
+        )
+
+
+# Vault Security Audit - High regression test: same class of bug as expected_apy above,
+# but for the HTTP request body's `position_size_usd` field (api.py).
+def test_position_size_usd_rejects_values_beyond_upper_bound():
+    from risk_engine.api import CrossChainEvaluateRequest
+
+    candidate = ChainOpportunity(chain_id=84532, chain_name="Base Sepolia", strategy_id="aave-usdc", expected_apy=0.15, risk_score=88)
+
+    with pytest.raises(ValidationError):
+        CrossChainEvaluateRequest(current=ARBITRUM, candidate=candidate, position_size_usd=1e400, costs=_costs())

@@ -3,7 +3,7 @@ reported via data_quality/failed_sources instead of silently producing a result 
 looks identical to "every strategy is genuinely too risky"."""
 from unittest.mock import patch
 
-from risk_engine.main import run
+from risk_engine.pipeline import run
 
 
 def test_all_sources_healthy_reports_complete_data_quality():
@@ -52,3 +52,24 @@ def test_every_source_failing_is_reported_as_unusable_not_a_real_zero_allocation
     assert opt["allocations"] == []
     assert opt["data_quality"] == "unusable"
     assert len(opt["failed_sources"]) >= 4
+
+
+# Vault Security Audit - High regression test: a data source can succeed (no exception)
+# but still return a value that fails StrategyMetrics's own Pydantic validation (e.g. a
+# negative TVL, or listedAt parsed into a negative protocol_age_days). This path used to
+# be OUTSIDE any try/except, so the ValidationError escaped straight to the /optimize
+# HTTP handler as an unhandled 500 with a stack trace. It must instead be treated like any
+# other failed data source: conservative default for that strategy + recorded in
+# failed_sources, never crashing the pipeline.
+def test_invalid_metrics_from_a_healthy_looking_source_does_not_crash_the_pipeline():
+    with (
+        patch("risk_engine.data_sources.defillama.get_current_tvl_usd", return_value=-500.0),  # invalid: tvl < 0
+        patch("risk_engine.data_sources.defillama.get_protocol_age_days", return_value=1000.0),
+        patch("risk_engine.data_sources.defillama.get_tvl_volatility_proxy", return_value=0.02),
+        patch("risk_engine.data_sources.onchain.get_aave_utilization", return_value=0.5),
+    ):
+        result = run()  # must not raise
+
+    opt = result["optimization_result"]
+    assert "validation:aave-usdc" in opt["failed_sources"]
+    assert opt["data_quality"] in ("degraded", "unusable")

@@ -19,11 +19,15 @@ def get_recommendation(optimization_input: OptimizationInput) -> Recommendation:
     try:
         return generate_recommendation(optimization_input)
     except LlmUnavailableError as exc:
+        # Vault Security Audit - High: `exc` có thể chứa chi tiết lỗi thật từ Anthropic
+        # API (status code, response body - xem llm_client.generate_recommendation). Log
+        # đầy đủ CHỈ ở đây (server-side) - `_deterministic_fallback` không nhận `exc`,
+        # đảm bảo caller không xác thực không bao giờ thấy chi tiết nội bộ AI provider.
         logger.warning("LLM unavailable, using deterministic fallback: %s", exc)
-        return _deterministic_fallback(optimization_input, reason=str(exc))
+        return _deterministic_fallback(optimization_input)
 
 
-def _deterministic_fallback(optimization_input: OptimizationInput, reason: str) -> Recommendation:
+def _deterministic_fallback(optimization_input: OptimizationInput) -> Recommendation:
     return Recommendation(
         allocations=[
             AllocationSuggestion(
@@ -36,9 +40,6 @@ def _deterministic_fallback(optimization_input: OptimizationInput, reason: str) 
         ],
         source="deterministic",
         confidence=1.0,
-        explanation=(
-            "AI Engine unavailable - showing the deterministic Risk/Optimization "
-            f"Engine's proposal directly, unmodified. ({reason})"
-        ),
+        explanation="AI recommendation unavailable, using deterministic fallback.",
         risk_flags=["ai_unavailable"],
     )

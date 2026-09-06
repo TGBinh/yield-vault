@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from risk_engine.models import AllocationSuggestion, OptimizationResult, RiskScore, StrategyMetrics
+from risk_engine.presentation import rationale as _rationale
 
 BPS_DENOMINATOR = 10_000
 
@@ -137,17 +138,6 @@ def _fix_rounding_drift(weights: dict[str, int], cap_bps: int, fully_redistribut
 
     # Không strategy nào nhận thêm được mà không vượt trần - bỏ qua phần lệch nhỏ này.
     return weights
-
-
-def _rationale(
-    strategy_id: str, weight_bps: int, eligible: list[RiskScore], metrics_by_id: dict[str, StrategyMetrics]
-) -> str:
-    rs = next(r for r in eligible if r.strategy_id == strategy_id)
-    apy = metrics_by_id[strategy_id].current_apy
-    return (
-        f"risk_score={rs.composite_score:.1f}/100, apy={apy * 100:.2f}%, "
-        f"target_weight={weight_bps / 100:.1f}%"
-    )
 
 
 def _now_iso() -> str:

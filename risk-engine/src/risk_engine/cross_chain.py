@@ -18,7 +18,10 @@ class ChainOpportunity(BaseModel):
     chain_id: int
     chain_name: str
     strategy_id: str
-    expected_apy: float = Field(description="APY dạng phân số, 0.05 = 5%/năm")
+    # Vault Security Audit - High: không có upper bound trước đây cho phép input như
+    # 1e400 parse thành `inf`, lan ra response JSON không hợp lệ. le=10 (1000%/năm) đã
+    # dư sức bao trùm mọi APY DeFi thật, kể cả các market cực đoan.
+    expected_apy: float = Field(ge=0, le=10, description="APY dạng phân số, 0.05 = 5%/năm")
     risk_score: float = Field(ge=0, le=100)
 
 
@@ -95,7 +98,10 @@ def evaluate_switch(
         reasoning = (
             f"Annualized yield improvement (${annualized_improvement:,.2f}) exceeds total switch cost "
             f"(${total_cost:,.2f}) by ${net_benefit:,.2f}"
-            + (f" - pays back in ~{payback_days:.0f} days." if payback_days else ".")
+            # Vault Security Audit - Medium: `payback_days == 0.0` (hoàn vốn NGAY LẬP TỨC,
+            # hợp lệ) bị truthiness hiểu nhầm thành "không có payback" - phải check
+            # `is not None` tường minh, không dùng truthiness trên số float.
+            + (f" - pays back in ~{payback_days:.0f} days." if payback_days is not None else ".")
         )
     else:
         reasoning = (
@@ -109,6 +115,6 @@ def evaluate_switch(
         annualized_yield_improvement_usd=round(annualized_improvement, 2),
         total_switch_cost_usd=round(total_cost, 2),
         net_benefit_usd=round(net_benefit, 2),
-        payback_days=round(payback_days, 1) if payback_days else None,
+        payback_days=round(payback_days, 1) if payback_days is not None else None,
         reasoning=reasoning,
     )

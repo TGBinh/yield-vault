@@ -58,12 +58,19 @@ _MORPHO_ABI = [
 ]
 
 
+# Vault Security Audit - Medium: `rpc_url`/`data_provider` hiện là tham số nội bộ
+# (default cố định, chỉ risk engine tự gọi), CHƯA có endpoint HTTP nào truyền trực tiếp
+# giá trị này từ bên ngoài vào. Nếu sau này wire thêm 1 endpoint public nhận URL này làm
+# input, PHẢI thêm allowlist domain trước khi cho phép - nếu không sẽ mở SSRF (server tự
+# gọi HTTP tới URL do người dùng chọn).
 def get_aave_utilization(
     asset: str = AAVE_USDC_UNDERLYING,
     rpc_url: str = AAVE_ARBITRUM_SEPOLIA_RPC,
     data_provider: str = AAVE_PROTOCOL_DATA_PROVIDER,
 ) -> float:
-    w3 = Web3(Web3.HTTPProvider(rpc_url))
+    # Vault Security Audit - Medium: thêm timeout tường minh - không có timeout, 1 RPC
+    # testnet treo (không phản hồi) sẽ khiến request /optimize treo vô thời hạn theo nó.
+    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 10}))
     contract = w3.eth.contract(address=Web3.to_checksum_address(data_provider), abi=_AAVE_DATA_PROVIDER_ABI)
     data = contract.functions.getReserveData(Web3.to_checksum_address(asset)).call()
     total_a_token, total_stable_debt, total_variable_debt = data[2], data[3], data[4]
@@ -78,7 +85,8 @@ def get_aave_utilization(
 def get_morpho_utilization(
     market_id: bytes, rpc_url: str = MORPHO_ETHEREUM_SEPOLIA_RPC, morpho_address: str = MORPHO_ADDRESS
 ) -> float:
-    w3 = Web3(Web3.HTTPProvider(rpc_url))
+    # Vault Security Audit - Medium: timeout tường minh, xem ghi chú ở get_aave_utilization.
+    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 10}))
     contract = w3.eth.contract(address=Web3.to_checksum_address(morpho_address), abi=_MORPHO_ABI)
     total_supply_assets, _, total_borrow_assets, _, _, _ = contract.functions.market(market_id).call()
 
