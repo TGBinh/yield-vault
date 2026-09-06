@@ -14,7 +14,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
-    "responses>=0.25",
+    "responses>=0.26.3",
 ]
 
 [tool.pytest.ini_options]
