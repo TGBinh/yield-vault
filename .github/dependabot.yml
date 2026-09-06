@@ -1,0 +1,26 @@
+version: 2
+updates:
+  # Root npm workspace (backend/frontend/indexer/contracts đều khai báo trong
+  # "workspaces" của package.json gốc) - Dependabot resolve lockfile từ đây.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/risk-engine"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/ai-engine"
+    schedule:
+      interval: "weekly"
+
+  # Vault Security Audit: GitHub Actions trong ci.yml giờ đã pin theo full SHA - vẫn
+  # cần Dependabot theo dõi để biết khi nào có bản vá bảo mật mới cho các action, thay
+  # vì âm thầm bị bỏ quên ở một SHA cũ mãi mãi.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

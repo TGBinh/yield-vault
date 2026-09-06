@@ -1,0 +1,10 @@
+# Vault Security Audit: build context của risk-engine là chính thư mục này (xem
+# docker-compose.yml "context: risk-engine") - loại file dev-only/secret ra khỏi image.
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+.env
+tests/
+README.md

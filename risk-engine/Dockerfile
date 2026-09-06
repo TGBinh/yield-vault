@@ -1,4 +1,7 @@
-FROM python:3.11-slim
+# Pin theo digest (không chỉ tag "3.11-slim") để build không bị âm thầm đổi base image
+# khi Docker Hub tag lại "3.11-slim" trỏ tới bản khác - digest lấy thật qua
+# `docker pull python:3.11-slim && docker inspect --format='{{index .RepoDigests 0}}'`.
+FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
 WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src

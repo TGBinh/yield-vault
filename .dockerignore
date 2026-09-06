@@ -7,3 +7,11 @@ contracts/cache
 contracts/typechain-types
 **/.env
 *.log
+
+# Vault Security Audit: backend/indexer build với context "." (copy toàn bộ repo, xem
+# comment trong backend/Dockerfile) - loại các file agent-tooling/nội bộ không liên quan
+# ra khỏi build context, tránh rò rỉ nội dung không cần thiết vào Docker image layer.
+.claude/
+.omc/
+PLAN.md
+v0-prompt.md

@@ -13,7 +13,9 @@ name: yield-vault
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # Pin theo digest thật (docker pull postgres:16-alpine + docker inspect RepoDigests)
+    # để tránh Docker Hub âm thầm đổi nội dung image đứng sau tag "16-alpine".
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -30,7 +32,9 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    # Pin theo digest thật (docker pull redis:7-alpine + docker inspect RepoDigests) -
+    # lý do tương tự postgres ở trên.
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     restart: unless-stopped
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env (copy .env.example) - no hardcoded default}"]
     ports:
@@ -103,7 +107,9 @@ services:
   # --- Observability (PLAN.md GD3 §7) ---
 
   prometheus:
-    image: prom/prometheus:v2.55.1
+    # Pin theo digest thật (docker pull + docker inspect RepoDigests) - dù tag đã ghim
+    # phiên bản cụ thể (v2.55.1), digest mới thực sự bất biến nếu tag bị build lại.
+    image: prom/prometheus:v2.55.1@sha256:2659f4c2ebb718e7695cb9b25ffa7d6be64db013daba13e05c875451cf51b0d3
     restart: unless-stopped
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -116,7 +122,8 @@ services:
       - indexer
 
   alertmanager:
-    image: prom/alertmanager:v0.27.0
+    # Pin theo digest thật - lý do tương tự prometheus ở trên.
+    image: prom/alertmanager:v0.27.0@sha256:e13b6ed5cb929eeaee733479dce55e10eb3bc2e9c4586c705a4e8da41e5eacf5
     restart: unless-stopped
     # alertmanager.yml is gitignored (copy alertmanager.yml.example and put your real
     # Discord/Telegram webhook URL in it - see the example file for details). Falls back
@@ -127,7 +134,8 @@ services:
       - "127.0.0.1:9093:9093"
 
   grafana:
-    image: grafana/grafana:11.3.1
+    # Pin theo digest thật - lý do tương tự prometheus/alertmanager ở trên.
+    image: grafana/grafana:11.3.1@sha256:fa801ab6e1ae035135309580891e09f7eb94d1abdbd2106bdc288030b028158c
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: admin

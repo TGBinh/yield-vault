@@ -1,8 +1,14 @@
 node_modules/
 .env
 .env.local
+.env.production
 dist/
 *.log
+
+# Vault Security Audit: TLS/private key file thật không bao giờ nên vào git - .env đã
+# được ignore ở trên nhưng key/cert độc lập (vd copy tay để test HTTPS local) thì chưa.
+*.pem
+*.key
 
 # Next.js
 .next/
