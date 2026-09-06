@@ -19,12 +19,10 @@ function makeRecommendation(overrides: Partial<RecommendationDto> = {}): Recomme
   return { ...base, ...overrides };
 }
 
-function makePool(registeredStrategies: string[]) {
+function makeStrategiesService(registeredStrategies: string[]) {
   return {
-    query: jest.fn().mockResolvedValue({
-      rows: registeredStrategies.map((strategy) => ({ strategy })),
-    }),
-  } as unknown as import('pg').Pool;
+    getConfirmedStrategyAddresses: jest.fn().mockResolvedValue(registeredStrategies),
+  } as unknown as import('../strategies/strategies.service').StrategiesService;
 }
 
 /// Fake ioredis giả lập đúng semantics của SET key value PX ms NX (chỉ set khi key chưa
@@ -43,7 +41,7 @@ function makeRedis() {
 
 describe('PolicyService (Phase 4 - adversarial tests)', () => {
   it('approves a valid recommendation and produces an ExecutionIntent', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
+    const service = new PolicyService(makeStrategiesService([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const verdict = await service.evaluate(makeRecommendation(), { claimSlot: true });
 
@@ -53,7 +51,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('rejects when allocations do not sum to 10000 bps', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
+    const service = new PolicyService(makeStrategiesService([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const verdict = await service.evaluate(
       makeRecommendation({
@@ -71,7 +69,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('rejects a strategy that is not registered (whitelist violation)', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A]), makeRedis());
+    const service = new PolicyService(makeStrategiesService([STRATEGY_A]), makeRedis());
 
     const verdict = await service.evaluate(
       makeRecommendation({
@@ -88,7 +86,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('rejects a single strategy exceeding the 70% concentration cap even if the AI claims high confidence', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
+    const service = new PolicyService(makeStrategiesService([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const verdict = await service.evaluate(
       makeRecommendation({
@@ -106,7 +104,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('rejects a low-confidence AI recommendation even when numerically valid', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
+    const service = new PolicyService(makeStrategiesService([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const verdict = await service.evaluate(makeRecommendation({ source: 'ai', confidence: 0.1 }), {
       claimSlot: true,
@@ -117,7 +115,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('enforces a rebalance cooldown after an approval', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
+    const service = new PolicyService(makeStrategiesService([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const first = await service.evaluate(makeRecommendation(), { claimSlot: true });
     expect(first.approved).toBe(true);
@@ -128,7 +126,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('accepts small rounding drift in the bps sum (within tolerance)', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
+    const service = new PolicyService(makeStrategiesService([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const verdict = await service.evaluate(
       makeRecommendation({
@@ -146,7 +144,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   // Vault Security Audit - Critical C2: verify các payload đã chứng minh bypass được
   // Policy Engine trước khi vá, giờ phải bị reject rõ ràng.
   it('rejects NaN targetWeightBps instead of letting it slip through numeric comparisons', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
+    const service = new PolicyService(makeStrategiesService([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const verdict = await service.evaluate(
       makeRecommendation({
@@ -163,7 +161,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('rejects a negative weight used to disguise over-100%-exposure while the sum still nets to 10000', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B, UNKNOWN_STRATEGY]), makeRedis());
+    const service = new PolicyService(makeStrategiesService([STRATEGY_A, STRATEGY_B, UNKNOWN_STRATEGY]), makeRedis());
 
     const verdict = await service.evaluate(
       makeRecommendation({
@@ -181,7 +179,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('rejects the same strategy split across multiple entries to dodge the single-strategy cap', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A]), makeRedis());
+    const service = new PolicyService(makeStrategiesService([STRATEGY_A]), makeRedis());
 
     const verdict = await service.evaluate(
       makeRecommendation({
@@ -198,7 +196,7 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
   });
 
   it('peeking the verdict (claimSlot: false) never consumes the cooldown slot', async () => {
-    const service = new PolicyService(makePool([STRATEGY_A, STRATEGY_B]), makeRedis());
+    const service = new PolicyService(makeStrategiesService([STRATEGY_A, STRATEGY_B]), makeRedis());
 
     const peek1 = await service.evaluate(makeRecommendation(), { claimSlot: false });
     const peek2 = await service.evaluate(makeRecommendation(), { claimSlot: false });

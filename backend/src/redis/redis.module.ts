@@ -11,10 +11,10 @@ import { REDIS_CLIENT } from './redis.constants';
       provide: REDIS_CLIENT,
       inject: [ConfigService],
       useFactory: (configService: ConfigService): Redis => {
-        const redisUrl = configService.get<string>(
-          'REDIS_URL',
-          'redis://localhost:6379',
-        );
+        // Vault Security Audit: không còn fallback localhost im lặng - ConfigModule đã
+        // validate REDIS_URL bắt buộc ở env.validation.ts, thiếu biến này sẽ crash ngay
+        // lúc boot thay vì lặng lẽ nối nhầm Redis local.
+        const redisUrl = configService.getOrThrow<string>('REDIS_URL');
         return new Redis(redisUrl, {
           lazyConnect: false,
           maxRetriesPerRequest: 3,

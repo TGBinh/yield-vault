@@ -81,4 +81,18 @@ export class StrategiesService {
       activeStrategyAddress,
     };
   }
+
+  /// Vault Security Audit - Medium: PolicyService trước đây tự SQL thẳng vào bảng
+  /// strategy_events (thuộc StrategiesModule) thay vì đi qua service này - vi phạm
+  /// module boundary. Tập trung SQL whitelist strategy về đúng 1 chỗ, giữ nguyên điều
+  /// kiện confirmed = true (đã vá ở Vault Security Audit - High trước đó).
+  async getConfirmedStrategyAddresses(): Promise<string[]> {
+    const result = await this.pool.query<{ strategy: string }>(
+      `SELECT DISTINCT payload->>'strategy' AS strategy
+       FROM strategy_events
+       WHERE event_name = $1 AND confirmed = true AND payload->>'strategy' IS NOT NULL`,
+      [STRATEGY_REGISTERED_EVENT],
+    );
+    return result.rows.map((r) => r.strategy);
+  }
 }

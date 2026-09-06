@@ -1,8 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { Pool } from 'pg';
 import type Redis from 'ioredis';
-import { PG_POOL } from '../database/database.constants';
 import { REDIS_CLIENT } from '../redis/redis.constants';
+import { StrategiesService } from '../strategies/strategies.service';
 import {
   ExecutionIntent,
   PolicyVerdict,
@@ -38,7 +37,7 @@ const EXECUTION_INTENT_TTL_MS = 15 * 60 * 1000; // human must approve within 15 
 @Injectable()
 export class PolicyService {
   constructor(
-    @Inject(PG_POOL) private readonly pool: Pool,
+    private readonly strategiesService: StrategiesService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
@@ -166,13 +165,13 @@ export class PolicyService {
 
   /// Vault Security Audit - High: thiếu `confirmed = true` từng để lọt 1 cửa sổ vài
   /// block nơi 1 StrategyRegistered nằm trong nhánh reorg vẫn được coi là whitelist hợp
-  /// lệ. Mọi service khác trong backend (vault, strategies, user) đều lọc field này.
+  /// lệ. Điều kiện này giờ nằm trong StrategiesService.getConfirmedStrategyAddresses().
+  ///
+  /// Vault Security Audit - Medium: PolicyService không còn tự SQL thẳng vào bảng
+  /// strategy_events (thuộc StrategiesModule) - đi qua StrategiesService để giữ đúng
+  /// module boundary, PolicyService chỉ còn lo policy rules.
   private async getRegisteredStrategies(): Promise<Set<string>> {
-    const result = await this.pool.query<{ strategy: string }>(
-      `SELECT DISTINCT payload->>'strategy' AS strategy
-       FROM strategy_events
-       WHERE event_name = 'StrategyRegistered' AND confirmed = true AND payload->>'strategy' IS NOT NULL`,
-    );
-    return new Set(result.rows.map((r) => r.strategy.toLowerCase()));
+    const addresses = await this.strategiesService.getConfirmedStrategyAddresses();
+    return new Set(addresses.map((address) => address.toLowerCase()));
   }
 }

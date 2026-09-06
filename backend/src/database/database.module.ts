@@ -11,10 +11,10 @@ import { PG_POOL } from './database.constants';
       provide: PG_POOL,
       inject: [ConfigService],
       useFactory: (configService: ConfigService): Pool => {
-        const connectionString = configService.get<string>(
-          'POSTGRES_URL',
-          'postgres://postgres:postgres@localhost:5432/yield_vault',
-        );
+        // Vault Security Audit: không còn fallback localhost im lặng - ConfigModule đã
+        // validate POSTGRES_URL bắt buộc ở env.validation.ts, thiếu biến này sẽ crash
+        // ngay lúc boot thay vì lặng lẽ nối nhầm DB local.
+        const connectionString = configService.getOrThrow<string>('POSTGRES_URL');
         return new Pool({ connectionString });
       },
     },
