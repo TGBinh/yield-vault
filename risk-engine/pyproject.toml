@@ -5,7 +5,7 @@ description = "Deterministic risk scoring + allocation optimization for the AI-P
 requires-python = ">=3.10"
 dependencies = [
     "requests>=2.31",
-    "web3>=6.15",
+    "web3>=8.0.0",
     "pydantic>=2.6",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
