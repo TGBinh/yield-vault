@@ -48,6 +48,21 @@ export function fetchVaultSummary(): Promise<VaultSummary> {
   return fetchJson<VaultSummary>("/vault/summary");
 }
 
+/// GĐ5 - Multichain: mỗi chain chạy 1 Vault/StrategyManager độc lập, không chia sẻ thanh
+/// khoản - TVL từng chain hiển thị riêng, KHÔNG cộng gộp (xem comment ở
+/// backend/src/vault/dto/vault-summary.dto.ts).
+export type ChainVaultSummary = {
+  chainId: number;
+  tvl: string;
+  totalShares: string;
+  depositCount: number;
+  withdrawalCount: number;
+};
+
+export function fetchVaultSummaryByChain(): Promise<ChainVaultSummary[]> {
+  return fetchJson<ChainVaultSummary[]>("/vault/summary-by-chain");
+}
+
 export function fetchUserPositions(address: string): Promise<UserPositions> {
   // Vault Security Audit: address hiện luôn đến từ useAccount() (hex hợp lệ), nhưng
   // encode để phòng thủ tầng sâu - không tin ngầm định câu chuyện "nguồn luôn sạch".

@@ -1,7 +1,12 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { fetchLatestRecommendation, fetchUserPositions, fetchVaultSummary } from "@/lib/backend";
+import {
+  fetchLatestRecommendation,
+  fetchUserPositions,
+  fetchVaultSummary,
+  fetchVaultSummaryByChain,
+} from "@/lib/backend";
 
 /**
  * Reads indexed history from the backend (Postgres, populated by the indexer)
@@ -13,6 +18,20 @@ export function useVaultSummaryFromBackend() {
     queryKey: ["backend", "vault-summary"],
     queryFn: fetchVaultSummary,
     refetchInterval: 15000,
+    retry: 1,
+  });
+}
+
+/**
+ * GĐ5 - Multichain: TVL/deposit/withdraw của TỪNG chain đang chạy indexer riêng, không
+ * cộng gộp (mỗi chain có Vault/StrategyManager độc lập). Poll chậm hơn vault-summary vì
+ * đây là dữ liệu tổng quan, không cần cập nhật theo từng giây như dashboard chính.
+ */
+export function useVaultSummaryByChain() {
+  return useQuery({
+    queryKey: ["backend", "vault-summary-by-chain"],
+    queryFn: fetchVaultSummaryByChain,
+    refetchInterval: 30000,
     retry: 1,
   });
 }

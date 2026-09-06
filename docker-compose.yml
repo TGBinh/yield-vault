@@ -65,6 +65,41 @@ services:
     ports:
       - "127.0.0.1:9464:9464"
 
+  # GĐ5 - Multichain: 1 instance indexer riêng cho chain thứ 2, ghi cùng schema Postgres
+  # (đã có sẵn chain_id từ GĐ2) - không cần sửa gì ở watcher.ts/cursor-store.ts, chỉ cần
+  # trỏ RPC/contract address khác. Đứng sau profile "multichain" nên `docker compose up`
+  # mặc định KHÔNG khởi động service này - chỉ chạy khi thật sự có chain thứ 2 để index
+  # (`docker compose --profile multichain up`), tránh yêu cầu RPC_URL_CHAIN_B ở mọi máy dev
+  # single-chain hiện tại.
+  indexer-chain-b:
+    profiles: ["multichain"]
+    build:
+      context: .
+      dockerfile: indexer/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Docker Compose nội suy biến cho MỌI service khai báo trong file, kể cả service
+      # đứng sau 1 profile chưa được chọn (đã verify: `docker compose config` không chọn
+      # profile "multichain" vẫn báo lỗi nếu dùng `:?required` ở đây) - dùng tham chiếu
+      # trần (không default rỗng) thay vì `:?required` để KHÔNG bắt buộc set các biến
+      # *_CHAIN_B ở mọi máy dev single-chain hiện tại. Nếu ai đó thật sự chạy
+      # `docker compose --profile multichain up` mà quên set, container này sẽ crash
+      # ngay lúc khởi động với lỗi rõ ràng từ chính schema validate của indexer
+      # (indexer/src/config.ts - VAULT_ADDRESS/STRATEGY_MANAGER_ADDRESS không có default).
+      RPC_URL: ${RPC_URL_CHAIN_B}
+      CHAIN_ID: ${CHAIN_ID_CHAIN_B}
+      POSTGRES_URL: postgres://postgres:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env, see .env.example}@postgres:5432/yield_vault
+      VAULT_ADDRESS: ${VAULT_ADDRESS_CHAIN_B}
+      STRATEGY_MANAGER_ADDRESS: ${STRATEGY_MANAGER_ADDRESS_CHAIN_B}
+      CONFIRMATIONS: ${CONFIRMATIONS_CHAIN_B:-3}
+      POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-2000}
+      METRICS_PORT: 9464
+    ports:
+      - "127.0.0.1:9465:9464"
+
   risk-engine:
     build:
       context: risk-engine
