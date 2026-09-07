@@ -128,6 +128,56 @@ async function main() {
     console.log("DEPOSIT_CAP_RAW not set - vault stays uncapped (dev/local default).");
   }
 
+  // GD6 Milestone 6.2: CrossChainExecutor chi deploy duoc tren network co dia chi CCIP
+  // Router THAT (Chainlink docs.chain.link/ccip/directory - khac nhau moi chain, khong
+  // co gia tri "mac dinh" hop le nao de doan). Khong set CCIP_ROUTER_ADDRESS = bo qua
+  // hoan toan buoc nay (dung cho local/hardhat va moi testnet chua can cross-chain).
+  const ccipRouterAddress = process.env.CCIP_ROUTER_ADDRESS;
+  let crossChainExecutorAddress: string | undefined;
+  let crossChainTimelockAddress: string | undefined;
+
+  if (ccipRouterAddress) {
+    const CrossChainExecutorFactory = await ethers.getContractFactory("CrossChainExecutor");
+    const executor = await CrossChainExecutorFactory.deploy(
+      deployer.address,
+      ccipRouterAddress,
+      await strategyManager.getAddress(),
+      await usdc.getAddress()
+    );
+    await executor.waitForDeployment();
+    crossChainExecutorAddress = await executor.getAddress();
+    console.log("CrossChainExecutor:", crossChainExecutorAddress, "router:", ccipRouterAddress);
+
+    const crossChainRole = await strategyManager.CROSS_CHAIN_ROLE();
+    await (await strategyManager.grantRole(crossChainRole, crossChainExecutorAddress)).wait();
+    console.log("CROSS_CHAIN_ROLE granted to CrossChainExecutor.");
+
+    const CrossChainTimelockFactory = await ethers.getContractFactory("CrossChainTimelock");
+    const crossChainTimelock = await CrossChainTimelockFactory.deploy(
+      deployer.address,
+      proposerAddress,
+      crossChainExecutorAddress
+    );
+    await crossChainTimelock.waitForDeployment();
+    crossChainTimelockAddress = await crossChainTimelock.getAddress();
+    console.log("CrossChainTimelock:", crossChainTimelockAddress, "proposer:", proposerAddress);
+
+    const executorRoleOnCrossChain = await executor.EXECUTOR_ROLE();
+    await (await executor.grantRole(executorRoleOnCrossChain, crossChainTimelockAddress)).wait();
+    console.log("EXECUTOR_ROLE (CrossChainExecutor) granted to CrossChainTimelock.");
+
+    // Peer whitelist (setPeer) KHONG lam o day - can dia chi CrossChainExecutor cua chain
+    // KIA, chi biet duoc SAU KHI da deploy ca 2 chain. Xem PLAN.md GD6 §4/§9: buoc noi cap
+    // 2 executor lai voi nhau la thao tac thu cong rieng, chay sau khi deploy xong ca 2
+    // phia (vi du qua 1 script wire-cross-chain-peers.ts o lan trien khai chain thu 2 -
+    // chua lam trong lan nay vi moi co 1 chain deploy Executor tinh den thoi diem hien tai).
+    console.log(
+      "NOTE: CrossChainExecutor.setPeer() chua duoc goi - phai goi thu cong sau khi ca 2 chain deploy xong."
+    );
+  } else {
+    console.log("CCIP_ROUTER_ADDRESS not set - skipping CrossChainExecutor/CrossChainTimelock deploy.");
+  }
+
   console.log("\n--- Deploy done ---");
   console.log(JSON.stringify({
     usdc: await usdc.getAddress(),
@@ -136,6 +186,8 @@ async function main() {
     strategy: strategyAddress,
     strategyType,
     rebalanceTimelock: await timelock.getAddress(),
+    crossChainExecutor: crossChainExecutorAddress ?? null,
+    crossChainTimelock: crossChainTimelockAddress ?? null,
   }, null, 2));
 }
 

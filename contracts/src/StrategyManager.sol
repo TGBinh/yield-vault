@@ -30,6 +30,12 @@ contract StrategyManager is IStrategyManager, AccessControl {
     /// sau khi da chuyen giao het EXECUTOR_ROLE cho RebalanceTimelock - xem
     /// RebalanceTimelock.sol va PLAN.md "Bao cao readiness - Phase 0".
     bytes32 public constant EXECUTOR_ROLE = keccak256("EXECUTOR_ROLE");
+    /// @notice GD6 Milestone 6.2: quyen rut von RA khoi chain nay / nhan von TU chain
+    /// khac, danh rieng cho CrossChainExecutor - tach biet hoan toan khoi EXECUTOR_ROLE
+    /// (rebalance GIUA cac strategy CUNG 1 chain) va onlyVault (deposit/withdraw cua
+    /// nguoi dung). Grant cho dia chi CrossChainExecutor da deploy tren dung chain nay,
+    /// KHONG grant cho EOA nao - xem scripts/deploy.ts.
+    bytes32 public constant CROSS_CHAIN_ROLE = keccak256("CROSS_CHAIN_ROLE");
     uint16 public constant BPS_DENOMINATOR = 10_000;
 
     error OnlyVault();
@@ -132,6 +138,20 @@ contract StrategyManager is IStrategyManager, AccessControl {
         _distribute(amount);
     }
 
+    /// @notice GD6 Milestone 6.2 - nhận vốn từ CCIP receiver (CrossChainExecutor) trên
+    /// chain này. Ngược convention với `deposit()`: token nhận từ CCIP đang nằm ở
+    /// CrossChainExecutor (không phải StrategyManager), nên hàm này PULL bằng
+    /// `safeTransferFrom` (CrossChainExecutor phải `approve` trước) thay vì giả định
+    /// asset đã được push sẵn vào đây. Nếu `_distribute` revert bên trong (vd. 1 strategy
+    /// lỗi), toàn bộ transferFrom cũng rollback theo - CrossChainExecutor giữ nguyên số
+    /// dư để retry sau (xem CrossChainExecutor._ccipReceive), không có tiền nào bị kẹt ở
+    /// đây.
+    function depositFromExecutor(uint256 amount) external onlyRole(CROSS_CHAIN_ROLE) {
+        if (activeStrategies.length == 0) revert NoActiveStrategy();
+        assetToken.safeTransferFrom(msg.sender, address(this), amount);
+        _distribute(amount);
+    }
+
     /// @dev Chia `amount` theo trọng số cho các strategy active; strategy cuối nhận phần
     /// dư để không mất mát do làm tròn số nguyên.
     function _distribute(uint256 amount) private {
@@ -158,15 +178,33 @@ contract StrategyManager is IStrategyManager, AccessControl {
     /// lượt từng strategy active (waterfall theo thứ tự đăng ký) - strategy nào lỗi
     /// (revert khi gọi `totalAssets()`/`withdraw()`) bị bỏ qua, không làm hỏng cả giao
     /// dịch. Chỉ revert nếu tổng rút được từ mọi nguồn vẫn không đủ `amount`.
-    /// @dev Slither báo reentrancy-balance (HIGH) - "remaining có thể stale sau external
-    /// call". Đánh giá kỹ: đây là false positive thật, không chỉ nhận định chủ quan -
-    /// `remaining` là biến local, không phải state; kịch bản tấn công duy nhất khả dĩ là
-    /// `to` (contract độc hại) reentrant khi nhận token, nhưng hàm này chỉ gọi được qua
-    /// `onlyVault`, và MỌI entrypoint public của Vault (`deposit`/`withdraw`/`redeem`) đã
-    /// có `nonReentrant` riêng - reentry qua đường hợp lệ duy nhất đã bị chặn từ tầng
-    /// Vault trước khi tới được đây. Suppress có chủ đích, không phải bỏ qua cảnh báo.
-    // slither-disable-next-line reentrancy-balance
     function withdraw(uint256 amount, address to) external onlyVault {
+        _withdrawFrom(amount, to);
+    }
+
+    /// @notice GD6 Milestone 6.2 - rút vốn RA để CrossChainExecutor gửi sang chain khác.
+    /// Dùng CHUNG logic waterfall (idle trước, rồi lần lượt từng strategy, bỏ qua strategy
+    /// lỗi) với `withdraw()` của Vault - 1 strategy lỗi không được chặn cả rebalance
+    /// cross-chain, cùng nguyên tắc isolation đã áp dụng cho user withdraw.
+    /// @dev Không tự thêm `nonReentrant` ở đây (StrategyManager không kế thừa
+    /// ReentrancyGuard) - CrossChainExecutor.initiateTransfer() (caller duy nhất được
+    /// cấp CROSS_CHAIN_ROLE) tự bọc nonReentrant ở tầng của nó.
+    function withdrawToExecutor(uint256 amount, address to) external onlyRole(CROSS_CHAIN_ROLE) {
+        _withdrawFrom(amount, to);
+    }
+
+    /// @dev Slither báo reentrancy-balance (HIGH) trên chính hàm này - "remaining có thể
+    /// stale sau external call". Đánh giá kỹ: đây là false positive thật, không chỉ nhận
+    /// định chủ quan - `remaining` là biến local, không phải state; kịch bản tấn công duy
+    /// nhất khả dĩ là `to` (contract độc hại) reentrant khi nhận token, nhưng 2 caller duy
+    /// nhất của hàm private này (`withdraw` chỉ `onlyVault`, `withdrawToExecutor` chỉ
+    /// `onlyRole(CROSS_CHAIN_ROLE)`) đều đã có `nonReentrant` chặn ở tầng gọi (Vault's
+    /// deposit/withdraw/redeem, và CrossChainExecutor.initiateTransfer) - reentry qua
+    /// đường hợp lệ duy nhất đã bị chặn trước khi tới được đây. Suppress có chủ đích, đặt
+    /// ngay tại hàm chứa pattern (không phải ở các wrapper mỏng gọi nó) để Slither thực sự
+    /// bỏ qua đúng chỗ.
+    // slither-disable-next-line reentrancy-balance
+    function _withdrawFrom(uint256 amount, address to) private {
         uint256 remaining = amount;
 
         uint256 idle = assetToken.balanceOf(address(this));

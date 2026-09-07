@@ -11,6 +11,8 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@chainlink/contracts-ccip": "1.6.2",
+    "@chainlink/local": "0.2.9",
     "@nomicfoundation/hardhat-foundry": "^1.2.1",
     "@nomicfoundation/hardhat-toolbox": "^6.1.2",
     "@safe-global/safe-contracts": "^1.4.1",

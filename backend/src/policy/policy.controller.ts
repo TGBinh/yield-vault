@@ -1,5 +1,6 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { RecommendationDto, PolicyVerdict } from './dto/recommendation.dto';
+import { CrossChainTransferRequestDto, CrossChainPolicyVerdict } from './dto/cross-chain-transfer.dto';
 import { PolicyService } from './policy.service';
 import { InternalApiKeyGuard } from '../common/guards/internal-api-key.guard';
 
@@ -14,5 +15,17 @@ export class PolicyController {
   @UseGuards(InternalApiKeyGuard)
   async evaluate(@Body() recommendation: RecommendationDto): Promise<PolicyVerdict> {
     return this.policy.evaluate(recommendation, { claimSlot: true });
+  }
+
+  /// GD6 Milestone 6.2 - cùng nguyên tắc claimSlot: true với /evaluate ở trên, nhưng
+  /// dùng cooldown/limit riêng cho cross-chain (xem PolicyService.evaluateCrossChainTransfer).
+  /// Đây là bước duy nhất Keeper/Safe được phép gọi TRƯỚC khi
+  /// CrossChainTimelock.queueTransfer() trên-chain.
+  @Post('evaluate-cross-chain')
+  @UseGuards(InternalApiKeyGuard)
+  async evaluateCrossChain(
+    @Body() request: CrossChainTransferRequestDto,
+  ): Promise<CrossChainPolicyVerdict> {
+    return this.policy.evaluateCrossChainTransfer(request, { claimSlot: true });
   }
 }

@@ -7,6 +7,11 @@ import {
   PolicyVerdict,
   RecommendationDto,
 } from './dto/recommendation.dto';
+import {
+  CrossChainExecutionIntent,
+  CrossChainPolicyVerdict,
+  CrossChainTransferRequestDto,
+} from './dto/cross-chain-transfer.dto';
 
 const BPS_DENOMINATOR = 10_000;
 const BPS_SUM_TOLERANCE = 5; // rounding drift, same tolerance risk-engine's own optimizer allows
@@ -20,6 +25,17 @@ const MIN_REBALANCE_INTERVAL_MS = 60 * 60 * 1000; // 1 rebalance/hour max
 const REBALANCE_COOLDOWN_KEY = 'policy:last-rebalance-approved-at';
 const MIN_CONFIDENCE_THRESHOLD = 0.3;
 const EXECUTION_INTENT_TTL_MS = 15 * 60 * 1000; // human must approve within 15 minutes
+
+/// GD6 Milestone 6.2 - PLAN.md GD6 §4: rule riêng cho cross-chain, tách biệt hoàn toàn
+/// khỏi rule rebalance nội bộ 1 chain ở trên (limit + cooldown khác nhau, key Redis khác
+/// nhau - 1 lần duyệt rebalance nội bộ không được phép "dùng ké" cooldown cross-chain hay
+/// ngược lại). Cả 2 con số đều NGHIÊM NGẶT hơn rebalance nội bộ vì rủi ro cao hơn: mất 1
+/// chan tin cay bo sung (CCIP) so voi chi rebalance giua cac strategy da whitelist cung 1
+/// chain - xem CrossChainTimelock.sol NatSpec vé "diem khong quay dau".
+const MAX_CROSSCHAIN_TVL_BPS = 2_000; // toi da 20% TVL nguon / 1 lan chuyen cross-chain
+const MIN_CROSSCHAIN_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h/lan, dai hon nhieu so voi 1h rebalance noi bo
+const CROSSCHAIN_COOLDOWN_KEY = 'policy:last-crosschain-approved-at';
+const CROSSCHAIN_EXECUTION_INTENT_TTL_MS = 15 * 60 * 1000;
 
 // Max-change-vs-current-allocation is a rule PLAN.md GD4 calls for ("giới hạn % thay
 // đổi phân bổ tối đa/lần") but is NOT enforced yet: the backend has no live source for
@@ -97,6 +113,107 @@ export class PolicyService {
     const elapsed = now - lastApproved;
     const waitMinutes = Math.ceil((MIN_REBALANCE_INTERVAL_MS - elapsed) / 60_000);
     return `Rebalance cooldown active - last approval was ${Math.round(elapsed / 60_000)} min ago, must wait ${waitMinutes} more minute(s)`;
+  }
+
+  /// GD6 Milestone 6.2 - PLAN.md GD6 §4/§9: gác cổng riêng cho đề xuất chuyển vốn
+  /// cross-chain (output của risk-engine's `POST /cross-chain/evaluate` - xem
+  /// risk_engine/cross_chain.py `evaluate_switch()`), TRƯỚC khi bất kỳ ai (Keeper/Safe)
+  /// được phép `CrossChainTimelock.queueTransfer()`. Không tin risk-engine's `shouldSwitch`
+  /// một mình - vẫn tự tính lại % TVL độc lập, cùng nguyên tắc defense-in-depth với
+  /// `evaluate()` ở trên.
+  async evaluateCrossChainTransfer(
+    request: CrossChainTransferRequestDto,
+    options: { claimSlot: boolean },
+  ): Promise<CrossChainPolicyVerdict> {
+    const rejection = this.checkCrossChainRules(request);
+    if (rejection) {
+      return { approved: false, reason: rejection, executionIntent: null };
+    }
+
+    const cooldownRejection = options.claimSlot
+      ? await this.tryClaimCrossChainSlot()
+      : await this.peekCrossChainCooldown();
+    if (cooldownRejection) {
+      return { approved: false, reason: cooldownRejection, executionIntent: null };
+    }
+
+    const executionIntent = this.buildCrossChainExecutionIntent(request);
+    return { approved: true, reason: 'All cross-chain policy checks passed', executionIntent };
+  }
+
+  private checkCrossChainRules(request: CrossChainTransferRequestDto): string | null {
+    let amount: bigint;
+    let tvl: bigint;
+    try {
+      amount = BigInt(request.amountRaw);
+      tvl = BigInt(request.currentVaultTvlRaw);
+    } catch {
+      return 'amountRaw/currentVaultTvlRaw must be valid integer strings';
+    }
+
+    if (amount <= 0n) {
+      return `amountRaw must be positive, got ${request.amountRaw}`;
+    }
+    if (tvl <= 0n) {
+      return `currentVaultTvlRaw must be positive, got ${request.currentVaultTvlRaw}`;
+    }
+    if (amount > tvl) {
+      return `amountRaw (${request.amountRaw}) exceeds currentVaultTvlRaw (${request.currentVaultTvlRaw})`;
+    }
+
+    // Khong tin risk-engine's shouldSwitch/netBenefitUsd mot minh - day la defense in
+    // depth, khong phai lap lai vo nghia: risk-engine co the bi loi/bug, hoac caller goi
+    // truc tiep endpoint nay voi payload tu bia.
+    if (!request.shouldSwitch) {
+      return 'risk-engine did not recommend this cross-chain switch (shouldSwitch=false)';
+    }
+    if (request.netBenefitUsd <= 0) {
+      return `net benefit is not positive (${request.netBenefitUsd} USD) - switching would be a net loss`;
+    }
+
+    const bps = (amount * BigInt(BPS_DENOMINATOR)) / tvl;
+    if (bps > BigInt(MAX_CROSSCHAIN_TVL_BPS)) {
+      return `Transfer requests ${bps} bps of source vault TVL, exceeds max cross-chain cap of ${MAX_CROSSCHAIN_TVL_BPS} bps per transfer`;
+    }
+
+    return null;
+  }
+
+  private async tryClaimCrossChainSlot(): Promise<string | null> {
+    const now = Date.now();
+    const claimed = await this.redis.set(
+      CROSSCHAIN_COOLDOWN_KEY,
+      String(now),
+      'PX',
+      MIN_CROSSCHAIN_INTERVAL_MS,
+      'NX',
+    );
+    if (claimed === 'OK') return null;
+
+    return this.formatCrossChainCooldownRejection(now);
+  }
+
+  private async peekCrossChainCooldown(): Promise<string | null> {
+    const raw = await this.redis.get(CROSSCHAIN_COOLDOWN_KEY);
+    if (raw === null) return null;
+    return this.formatCrossChainCooldownRejection(Date.now(), Number(raw));
+  }
+
+  private formatCrossChainCooldownRejection(now: number, lastApprovedAtMs?: number): string {
+    const lastApproved = lastApprovedAtMs ?? now;
+    const elapsed = now - lastApproved;
+    const waitMinutes = Math.ceil((MIN_CROSSCHAIN_INTERVAL_MS - elapsed) / 60_000);
+    return `Cross-chain transfer cooldown active - last approval was ${Math.round(elapsed / 60_000)} min ago, must wait ${waitMinutes} more minute(s)`;
+  }
+
+  private buildCrossChainExecutionIntent(request: CrossChainTransferRequestDto): CrossChainExecutionIntent {
+    const now = new Date();
+    return {
+      destinationChainSelector: request.destinationChainSelector,
+      amountRaw: request.amountRaw,
+      approvedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + CROSSCHAIN_EXECUTION_INTENT_TTL_MS).toISOString(),
+    };
   }
 
   /// Vault Security Audit - Critical C2: validate NGHIÊM NGẶT các giá trị số TRƯỚC khi

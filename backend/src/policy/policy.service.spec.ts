@@ -1,5 +1,6 @@
 import { PolicyService } from './policy.service';
 import { RecommendationDto } from './dto/recommendation.dto';
+import { CrossChainTransferRequestDto } from './dto/cross-chain-transfer.dto';
 
 const STRATEGY_A = '0x1111111111111111111111111111111111111a';
 const STRATEGY_B = '0x2222222222222222222222222222222222222b';
@@ -204,6 +205,115 @@ describe('PolicyService (Phase 4 - adversarial tests)', () => {
     expect(peek2.approved).toBe(true);
 
     const claimed = await service.evaluate(makeRecommendation(), { claimSlot: true });
+    expect(claimed.approved).toBe(true);
+  });
+});
+
+/// GD6 Milestone 6.2 - rule cross-chain hoàn toàn tách biệt với rule rebalance nội bộ ở
+/// trên (limit/cooldown/Redis key riêng - xem PolicyService.evaluateCrossChainTransfer).
+describe('PolicyService.evaluateCrossChainTransfer (GD6 Milestone 6.2)', () => {
+  function makeRequest(overrides: Partial<CrossChainTransferRequestDto> = {}): CrossChainTransferRequestDto {
+    const base: CrossChainTransferRequestDto = {
+      amountRaw: '1000000000', // 1000 USDC (6 decimals)
+      currentVaultTvlRaw: '10000000000', // 10000 USDC -> 10% of TVL
+      shouldSwitch: true,
+      netBenefitUsd: 500,
+      destinationChainSelector: '10344971235874465080', // Base Sepolia
+    };
+    return { ...base, ...overrides };
+  }
+
+  it('approves a valid cross-chain transfer request and produces an intent', async () => {
+    const service = new PolicyService(makeStrategiesService([]), makeRedis());
+
+    const verdict = await service.evaluateCrossChainTransfer(makeRequest(), { claimSlot: true });
+
+    expect(verdict.approved).toBe(true);
+    expect(verdict.executionIntent).not.toBeNull();
+    expect(verdict.executionIntent!.amountRaw).toBe('1000000000');
+  });
+
+  it('rejects when risk-engine did not recommend the switch', async () => {
+    const service = new PolicyService(makeStrategiesService([]), makeRedis());
+
+    const verdict = await service.evaluateCrossChainTransfer(makeRequest({ shouldSwitch: false }), {
+      claimSlot: true,
+    });
+
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reason).toMatch(/did not recommend/);
+  });
+
+  it('rejects when net benefit is not positive, even if shouldSwitch claims true', async () => {
+    const service = new PolicyService(makeStrategiesService([]), makeRedis());
+
+    const verdict = await service.evaluateCrossChainTransfer(makeRequest({ netBenefitUsd: -1 }), {
+      claimSlot: true,
+    });
+
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reason).toMatch(/net loss/);
+  });
+
+  it('rejects a transfer exceeding the 20% TVL-per-transfer cap', async () => {
+    const service = new PolicyService(makeStrategiesService([]), makeRedis());
+
+    const verdict = await service.evaluateCrossChainTransfer(
+      makeRequest({ amountRaw: '3000000000' }), // 30% of a 10000 USDC TVL
+      { claimSlot: true },
+    );
+
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reason).toMatch(/exceeds max cross-chain cap/);
+  });
+
+  it('rejects amountRaw larger than currentVaultTvlRaw outright', async () => {
+    const service = new PolicyService(makeStrategiesService([]), makeRedis());
+
+    const verdict = await service.evaluateCrossChainTransfer(
+      makeRequest({ amountRaw: '20000000000' }),
+      { claimSlot: true },
+    );
+
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reason).toMatch(/exceeds currentVaultTvlRaw/);
+  });
+
+  it('rejects malformed non-integer amount strings instead of letting BigInt() throw uncaught', async () => {
+    const service = new PolicyService(makeStrategiesService([]), makeRedis());
+
+    const verdict = await service.evaluateCrossChainTransfer(
+      makeRequest({ amountRaw: '1e21' }),
+      { claimSlot: true },
+    );
+
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reason).toMatch(/valid integer strings/);
+  });
+
+  it('enforces its own 6h cooldown, independent from the 1h in-chain rebalance cooldown', async () => {
+    const service = new PolicyService(makeStrategiesService([STRATEGY_A, STRATEGY_B]), makeRedis());
+
+    const rebalance = await service.evaluate(makeRecommendation(), { claimSlot: true });
+    expect(rebalance.approved).toBe(true);
+
+    const firstCrossChain = await service.evaluateCrossChainTransfer(makeRequest(), { claimSlot: true });
+    expect(firstCrossChain.approved).toBe(true);
+
+    const secondCrossChain = await service.evaluateCrossChainTransfer(makeRequest(), { claimSlot: true });
+    expect(secondCrossChain.approved).toBe(false);
+    expect(secondCrossChain.reason).toMatch(/Cross-chain transfer cooldown active/);
+  });
+
+  it('peeking (claimSlot: false) never consumes the cross-chain cooldown slot', async () => {
+    const service = new PolicyService(makeStrategiesService([]), makeRedis());
+
+    const peek1 = await service.evaluateCrossChainTransfer(makeRequest(), { claimSlot: false });
+    const peek2 = await service.evaluateCrossChainTransfer(makeRequest(), { claimSlot: false });
+    expect(peek1.approved).toBe(true);
+    expect(peek2.approved).toBe(true);
+
+    const claimed = await service.evaluateCrossChainTransfer(makeRequest(), { claimSlot: true });
     expect(claimed.approved).toBe(true);
   });
 });
