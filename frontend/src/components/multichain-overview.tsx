@@ -34,9 +34,12 @@ export function MultichainOverview({ usdcDecimals }: { usdcDecimals: number }) {
         {data && data.length > 0 && (
           <ul className="divide-y divide-border">
             {data.map((chain) => (
-              <li key={chain.chainId} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <li
+                key={chain.chainId}
+                className="flex flex-col gap-1 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:py-2"
+              >
                 <span className="font-mono text-xs text-muted">chainId {chain.chainId}</span>
-                <span className="flex items-center gap-3 text-foreground">
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-foreground">
                   <span>{formatTokenAmount(BigInt(chain.tvl), usdcDecimals)} mUSDC</span>
                   <span className="text-xs text-muted">
                     {chain.depositCount} deposits / {chain.withdrawalCount} withdrawals

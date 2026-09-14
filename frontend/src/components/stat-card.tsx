@@ -22,9 +22,9 @@ export function StatCard({
       className="animate-fade-up"
       style={{ animationDelay: `${delay}ms` }}
     >
-      <CardContent className="pt-5">
+      <CardContent className="pt-4 sm:pt-5">
         <div className="flex items-start justify-between">
-          <span className="text-xs font-medium uppercase tracking-wide text-muted">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted sm:text-xs">
             {label}
           </span>
           {icon && (
@@ -34,13 +34,13 @@ export function StatCard({
         <div className="mt-2 flex items-baseline gap-1.5">
           <span
             className={cn(
-              "font-mono text-2xl font-semibold tabular-nums tracking-tight",
+              "font-mono text-xl font-semibold tabular-nums tracking-tight sm:text-2xl",
               accent && "text-accent",
             )}
           >
             {value}
           </span>
-          {suffix && <span className="text-sm font-medium text-muted">{suffix}</span>}
+          {suffix && <span className="text-xs font-medium text-muted sm:text-sm">{suffix}</span>}
         </div>
       </CardContent>
     </Card>

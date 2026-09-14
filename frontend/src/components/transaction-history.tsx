@@ -64,8 +64,8 @@ export function TransactionHistory({ usdcDecimals }: { usdcDecimals: number }) {
         {rows.length > 0 && (
           <ul className="divide-y divide-border">
             {rows.map((row) => (
-              <li key={row.key} className="flex items-center justify-between gap-3 py-3">
-                <div className="flex items-center gap-3">
+              <li className="flex flex-col gap-1.5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3" key={row.key}>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <Badge variant={row.kind === "deposit" ? "positive" : "negative"}>
                     {row.kind === "deposit" ? (
                       <ArrowDownLeft className="size-3" />

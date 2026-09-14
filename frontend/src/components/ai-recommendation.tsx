@@ -58,9 +58,12 @@ export function AiRecommendation() {
 
             <ul className="divide-y divide-border">
               {data.recommendation.allocations.map((allocation) => (
-                <li key={allocation.strategyId} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <li
+                  key={allocation.strategyId}
+                  className="flex flex-col gap-1 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:py-2"
+                >
                   <span className="truncate font-mono text-xs text-muted">{allocation.strategyId}</span>
-                  <span className="flex items-center gap-3 text-foreground">
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-foreground">
                     <span>{(allocation.targetWeightBps / 100).toFixed(1)}%</span>
                     <span className="text-xs text-muted">risk {allocation.riskScore.toFixed(0)}/100</span>
                     <span className="text-xs text-muted">apy {(allocation.expectedApy * 100).toFixed(2)}%</span>
