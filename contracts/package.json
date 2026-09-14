@@ -13,7 +13,7 @@
   "devDependencies": {
     "@chainlink/contracts-ccip": "1.6.2",
     "@chainlink/local": "0.2.9",
-    "@nomicfoundation/hardhat-foundry": "^1.2.1",
+    "@nomicfoundation/hardhat-foundry": "^3.0.4",
     "@nomicfoundation/hardhat-toolbox": "^6.1.2",
     "@safe-global/safe-contracts": "^1.4.1",
     "@types/node": "^26.3.0",
