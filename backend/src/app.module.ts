@@ -10,6 +10,7 @@ import { MetricsModule } from './metrics/metrics.module';
 import { PolicyModule } from './policy/policy.module';
 import { RecommendationsModule } from './recommendations/recommendations.module';
 import { GovernanceModule } from './governance/governance.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { GovernanceModule } from './governance/governance.module';
     PolicyModule,
     RecommendationsModule,
     GovernanceModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

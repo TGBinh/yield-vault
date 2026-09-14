@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { SocketIoAdapter } from './notifications/socket-io.adapter';
 
 const logger = new Logger('Bootstrap');
 const DEFAULT_CORS_ORIGIN = 'http://localhost:3000';
@@ -32,6 +33,10 @@ async function bootstrap(): Promise<void> {
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
   app.enableCors({ origin: corsOrigins });
+
+  // Phase 4 (realtime notifications) - socket.io cần adapter riêng để áp dụng cùng
+  // allowlist CORS ở trên (xem notifications/socket-io.adapter.ts).
+  app.useWebSocketAdapter(new SocketIoAdapter(app, configService));
 
   const port = configService.get<number>('PORT', 3001);
 

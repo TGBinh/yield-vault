@@ -4,6 +4,7 @@ import { pool } from "./db/client";
 import { reorgsDetectedTotal } from "./metrics";
 import { rewindCursor } from "./cursor-store";
 import { ALLOWED_TABLES, assertAllowedTable, type AllowedTable } from "./event-repository";
+import { publishConfirmedEvent } from "./redis-publisher";
 
 // Vault Security Audit - Organization: tách khỏi watcher.ts (God class 326 dòng) - đây là
 // toàn bộ logic re-verify các row chưa confirm sau khi đạt độ sâu confirmation, hành vi
@@ -45,7 +46,17 @@ export async function confirmPendingRows(client: PublicClient, currentBlock: big
     for (const row of pending.rows) {
       const stillOnChain = await transactionStillOnChain(client, row.tx_hash as `0x${string}`, BigInt(row.block_number));
       if (stillOnChain) {
-        await pool.query(`UPDATE ${table} SET confirmed = TRUE WHERE id = $1`, [row.id]);
+        // Phase 4 (realtime notifications): publish NGAY TẠI ĐÂY, điểm xác nhận thật duy
+        // nhất trong toàn bộ indexer - không publish lúc thấy log lần đầu (dễ false-
+        // positive do reorg). `RETURNING *` để lấy đủ cột (assets/shares/payload...) cho
+        // 1 lần round-trip, không query lại.
+        const updated = await pool.query(`UPDATE ${table} SET confirmed = TRUE WHERE id = $1 RETURNING *`, [
+          row.id,
+        ]);
+        const confirmedRow = updated.rows[0] as Record<string, unknown> | undefined;
+        if (confirmedRow) {
+          await publishConfirmedEvent(table, confirmedRow);
+        }
       } else {
         reorgsDetectedTotal.inc();
         console.warn(
