@@ -9,6 +9,8 @@ import { WithdrawForm } from "@/components/withdraw-form";
 import { TransactionHistory } from "@/components/transaction-history";
 import { AiRecommendation } from "@/components/ai-recommendation";
 import { MultichainOverview } from "@/components/multichain-overview";
+import { PerformanceChart } from "@/components/performance-chart";
+import { StrategyAllocation } from "@/components/strategy-allocation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useVaultData } from "@/hooks/use-vault-data";
@@ -66,6 +68,8 @@ export function VaultDashboard() {
         />
       </div>
 
+      <PerformanceChart usdcDecimals={usdcDecimals} />
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.3fr]">
         <Card className="animate-fade-up" style={{ animationDelay: "220ms" }}>
           <CardHeader className="flex-row items-center justify-between space-y-0">
@@ -122,8 +126,9 @@ export function VaultDashboard() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
         <TransactionHistory usdcDecimals={usdcDecimals} />
+        <StrategyAllocation />
         <AiRecommendation />
       </div>
 

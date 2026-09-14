@@ -3,7 +3,11 @@ import type { Pool } from 'pg';
 import type Redis from 'ioredis';
 import { PG_POOL } from '../database/database.constants';
 import { REDIS_CLIENT } from '../redis/redis.constants';
-import { ChainVaultSummaryDto, VaultSummaryDto } from './dto/vault-summary.dto';
+import {
+  ChainVaultSummaryDto,
+  VaultHistoryPointDto,
+  VaultSummaryDto,
+} from './dto/vault-summary.dto';
 import { MetricsService } from '../metrics/metrics.service';
 
 const VAULT_SUMMARY_CACHE_KEY = 'vault:summary';
@@ -29,6 +33,12 @@ interface ChainAggregateRow {
   withdrawal_assets: string | null;
   withdrawal_shares: string | null;
   withdrawal_count: string;
+}
+
+interface VaultSnapshotRow {
+  block_timestamp: Date;
+  tvl: string;
+  total_shares: string;
 }
 
 @Injectable()
@@ -152,6 +162,44 @@ export class VaultService {
         totalShares: totalShares.toString(),
         depositCount: Number(row.deposit_count),
         withdrawalCount: Number(row.withdrawal_count),
+      };
+    });
+  }
+
+  /// Phase 1 (dashboard performance chart) - đọc từ `vault_snapshots` (ghi định kỳ bởi
+  /// indexer, xem indexer/src/snapshot-writer.ts) - KHÁC với getSummary() ở trên, đây là
+  /// chuỗi thời gian thật chứ không phải 1 giá trị tức thời. sharePrice tính lại đúng
+  /// công thức đã dùng ở computeSummary() (không viết lại logic).
+  async getHistory(chainId: number, fromMs?: number, toMs?: number): Promise<VaultHistoryPointDto[]> {
+    const conditions = ['chain_id = $1'];
+    const params: (number | string)[] = [chainId];
+
+    if (fromMs !== undefined) {
+      params.push(new Date(fromMs).toISOString());
+      conditions.push(`block_timestamp >= $${params.length}`);
+    }
+    if (toMs !== undefined) {
+      params.push(new Date(toMs).toISOString());
+      conditions.push(`block_timestamp <= $${params.length}`);
+    }
+
+    const result = await this.pool.query<VaultSnapshotRow>(
+      `SELECT block_timestamp, tvl::text, total_shares::text
+       FROM vault_snapshots
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY block_timestamp ASC`,
+      params,
+    );
+
+    return result.rows.map((row) => {
+      const tvl = BigInt(row.tvl);
+      const totalShares = BigInt(row.total_shares);
+      const sharePrice = totalShares > 0n ? ((tvl * 10n ** 18n) / totalShares).toString() : null;
+      return {
+        timestamp: row.block_timestamp.toISOString(),
+        tvl: row.tvl,
+        totalShares: row.total_shares,
+        sharePrice,
       };
     });
   }

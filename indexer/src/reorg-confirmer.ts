@@ -16,6 +16,7 @@ const REORG_TABLE_ADDRESS_COLUMN: Record<AllowedTable, string> = {
   deposits: "vault_address",
   withdrawals: "vault_address",
   strategy_events: "contract_address",
+  governance_events: "contract_address",
 };
 
 /**

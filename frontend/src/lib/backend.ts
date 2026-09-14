@@ -113,3 +113,54 @@ export type RecommendationPipelineResult = {
 export function fetchLatestRecommendation(): Promise<RecommendationPipelineResult> {
   return fetchJson<RecommendationPipelineResult>("/recommendations/latest");
 }
+
+/// Phase 1 (dashboard performance chart) - 1 điểm mẫu trong vault_snapshots, xem
+/// backend/src/vault/dto/vault-summary.dto.ts VaultHistoryPointDto.
+export type VaultHistoryPoint = {
+  timestamp: string;
+  tvl: string;
+  totalShares: string;
+  sharePrice: string | null;
+};
+
+export function fetchVaultHistory(chainId: number): Promise<VaultHistoryPoint[]> {
+  return fetchJson<VaultHistoryPoint[]>(`/vault/history?chainId=${chainId}`);
+}
+
+/// Phase 2 (strategy allocation breakdown + risk score) - xem
+/// backend/src/strategies/dto/strategy-event.dto.ts StrategyRiskDto. `riskScore`/`expectedApy`
+/// có thể null (risk-engine catalog dùng slug, on-chain dùng địa chỉ - xem comment trong
+/// strategies.service.ts getActiveAllocationWithRisk) - component phải tự xử lý null,
+/// không giả định luôn có điểm.
+export type StrategyRisk = {
+  strategyId: string;
+  weightBps: number;
+  riskScore: number | null;
+  tvlScore: number | null;
+  utilizationScore: number | null;
+  volatilityScore: number | null;
+  ageScore: number | null;
+  expectedApy: number | null;
+};
+
+export type ActiveAllocationRisk = {
+  strategies: StrategyRisk[];
+  asOf: string | null;
+};
+
+export function fetchActiveAllocationRisk(): Promise<ActiveAllocationRisk> {
+  return fetchJson<ActiveAllocationRisk>("/strategies/active-risk");
+}
+
+/// Phase 3 (Governance page) - xem backend/src/governance/dto/governance.dto.ts.
+export type PendingProposal = {
+  kind: "rebalance" | "cross-chain";
+  id: string;
+  eta: string;
+  queuedAt: string;
+  payload: Record<string, unknown>;
+};
+
+export function fetchGovernancePending(): Promise<{ proposals: PendingProposal[] }> {
+  return fetchJson<{ proposals: PendingProposal[] }>("/governance/pending");
+}

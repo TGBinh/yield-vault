@@ -2,8 +2,11 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
+  fetchActiveAllocationRisk,
+  fetchGovernancePending,
   fetchLatestRecommendation,
   fetchUserPositions,
+  fetchVaultHistory,
   fetchVaultSummary,
   fetchVaultSummaryByChain,
 } from "@/lib/backend";
@@ -42,6 +45,48 @@ export function useUserPositionsFromBackend(address: string | undefined) {
     queryFn: () => fetchUserPositions(address as string),
     enabled: !!address,
     refetchInterval: 15000,
+    retry: 1,
+  });
+}
+
+/**
+ * Phase 1 (dashboard performance chart) - chuỗi thời gian TVL/share price từ
+ * vault_snapshots. Dữ liệu lịch sử, không cần refetch nhanh như vault-summary.
+ */
+export function useVaultHistory(chainId: number) {
+  return useQuery({
+    queryKey: ["backend", "vault-history", chainId],
+    queryFn: () => fetchVaultHistory(chainId),
+    refetchInterval: 60000,
+    retry: 1,
+  });
+}
+
+/**
+ * Phase 2 (strategy allocation breakdown + risk score) - phân bổ ĐANG CHẠY thật on-chain
+ * (không phải đề xuất) kèm điểm rủi ro risk-engine chấm cho từng strategy đó. Cùng nhịp
+ * poll với multichain overview (30s) - dữ liệu này đổi chậm (chỉ đổi khi có rebalance).
+ */
+export function useActiveAllocationRisk() {
+  return useQuery({
+    queryKey: ["backend", "active-allocation-risk"],
+    queryFn: fetchActiveAllocationRisk,
+    refetchInterval: 30000,
+    retry: 1,
+  });
+}
+
+/**
+ * Phase 3 (Governance page) - đề xuất RebalanceTimelock/CrossChainTimelock đang chờ, suy ra
+ * từ event log qua indexer (mapping trên contract không enumerable). Poll nhanh hơn các hook
+ * khác (10s) vì countdown/trạng thái "đang chờ" là thứ người xem trang Governance cần thấy
+ * gần-thời-gian-thực.
+ */
+export function useGovernancePending() {
+  return useQuery({
+    queryKey: ["backend", "governance-pending"],
+    queryFn: fetchGovernancePending,
+    refetchInterval: 10000,
     retry: 1,
   });
 }

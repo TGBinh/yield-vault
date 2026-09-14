@@ -19,3 +19,13 @@ export class ChainVaultSummaryDto {
   depositCount!: number;
   withdrawalCount!: number;
 }
+
+/// Phase 1 (dashboard performance chart) - 1 điểm mẫu trong `vault_snapshots`, đọc trực
+/// tiếp on-chain lúc chụp (không cộng dồn deposits/withdrawals) nên phản ánh đúng lãi
+/// strategy đã accru - xem indexer/src/snapshot-writer.ts.
+export class VaultHistoryPointDto {
+  timestamp!: string; // ISO 8601
+  tvl!: string;
+  totalShares!: string;
+  sharePrice!: string | null;
+}

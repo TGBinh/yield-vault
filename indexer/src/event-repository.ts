@@ -13,7 +13,7 @@ import { config } from "./config";
 // bộ codebase (reorg-confirmer.ts nội suy tên bảng vào query text). Chốt 1 allowlist tường
 // minh làm hàng rào phòng thủ - nếu sau này ai đó lỡ truyền 1 string tuỳ ý vào chỗ tên
 // bảng, code sẽ throw ngay thay vì âm thầm chạy SQL không mong muốn.
-export const ALLOWED_TABLES = ["deposits", "withdrawals", "strategy_events"] as const;
+export const ALLOWED_TABLES = ["deposits", "withdrawals", "strategy_events", "governance_events"] as const;
 export type AllowedTable = (typeof ALLOWED_TABLES)[number];
 
 export function assertAllowedTable(table: string): asserts table is AllowedTable {
@@ -102,6 +102,39 @@ export async function insertStrategyEvent(params: {
   const { txHash, logIndex, blockNumber, blockTimestampIso, contractAddress, eventName, payload } = params;
   await pool.query(
     `INSERT INTO strategy_events
+       (chain_id, tx_hash, log_index, block_number, block_timestamp, contract_address, event_name, payload, confirmed)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE)
+     ON CONFLICT (chain_id, tx_hash, log_index) DO NOTHING`,
+    [
+      config.chainId,
+      txHash,
+      logIndex,
+      blockNumber.toString(),
+      blockTimestampIso,
+      contractAddress.toLowerCase(),
+      eventName,
+      JSON.stringify(payload),
+    ],
+  );
+}
+
+/// Phase 3 (Governance page) - RebalanceTimelock/CrossChainTimelock event
+/// (RebalanceQueued/Executed/Canceled, TransferQueued/Executed/Canceled). Schema giống hệt
+/// insertStrategyEvent - tách hàm riêng (thay vì tái dùng chung 1 hàm với tên bảng làm
+/// tham số) để giữ đúng convention ALLOWED_TABLES/assertAllowedTable đã áp dụng nhất quán:
+/// tên bảng luôn là literal cố định ngay tại lời gọi SQL, không bao giờ truyền qua biến.
+export async function insertGovernanceEvent(params: {
+  txHash: string;
+  logIndex: number;
+  blockNumber: bigint;
+  blockTimestampIso: string;
+  contractAddress: `0x${string}`;
+  eventName: string;
+  payload: Record<string, unknown>;
+}): Promise<void> {
+  const { txHash, logIndex, blockNumber, blockTimestampIso, contractAddress, eventName, payload } = params;
+  await pool.query(
+    `INSERT INTO governance_events
        (chain_id, tx_hash, log_index, block_number, block_timestamp, contract_address, event_name, payload, confirmed)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE)
      ON CONFLICT (chain_id, tx_hash, log_index) DO NOTHING`,

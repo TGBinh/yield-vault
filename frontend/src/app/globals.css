@@ -123,3 +123,20 @@
 .animate-pulse-ring {
   animation: pulse-ring 1.8s ease-out infinite;
 }
+
+/* Sheet (mobile nav drawer, notification tray) - tailwindcss-animate KHÔNG được cài trong
+   project này, tự viết keyframe tối giản thay vì thêm dependency mới chỉ cho 1 hiệu ứng. */
+@keyframes overlay-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sheet-slide-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+.animate-overlay-fade-in {
+  animation: overlay-fade-in 0.15s ease-out both;
+}
+.animate-sheet-slide-in-left {
+  animation: sheet-slide-in-left 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}

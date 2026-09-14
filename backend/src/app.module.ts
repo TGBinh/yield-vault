@@ -9,6 +9,7 @@ import { StrategiesModule } from './strategies/strategies.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { PolicyModule } from './policy/policy.module';
 import { RecommendationsModule } from './recommendations/recommendations.module';
+import { GovernanceModule } from './governance/governance.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { RecommendationsModule } from './recommendations/recommendations.module'
     StrategiesModule,
     PolicyModule,
     RecommendationsModule,
+    GovernanceModule,
   ],
 })
 export class AppModule {}

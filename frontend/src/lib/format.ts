@@ -61,3 +61,32 @@ export function shortenAddress(address: string | undefined, chars = 4): string {
   if (!address) return "";
   return `${address.slice(0, 2 + chars)}…${address.slice(-chars)}`;
 }
+
+/**
+ * "23h 14m", "2d 3h", "45s" - dùng cho đếm ngược timelock (Governance) và tooltip chart.
+ * Âm (đã qua hạn) trả về "0s" thay vì chuỗi âm gây hiểu nhầm - caller tự quyết định hiển
+ * thị "đã qua hạn"/"có thể thực thi" dựa trên dấu của giá trị gốc, hàm này chỉ format độ
+ * lớn.
+ */
+export function formatDuration(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${secs}s`;
+  return `${secs}s`;
+}
+
+/** "vừa xong", "5 phút trước", "3 giờ trước" - dùng cho nhãn trục thời gian trên chart/danh sách sự kiện. */
+export function formatRelativeTime(timestampMs: number): string {
+  const diffSeconds = Math.floor((Date.now() - timestampMs) / 1000);
+  if (diffSeconds < 5) return "vừa xong";
+  if (diffSeconds < 60) return `${diffSeconds} giây trước`;
+  if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)} phút trước`;
+  if (diffSeconds < 86400) return `${Math.floor(diffSeconds / 3600)} giờ trước`;
+  return `${Math.floor(diffSeconds / 86400)} ngày trước`;
+}

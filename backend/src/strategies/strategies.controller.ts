@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { StrategiesService } from './strategies.service';
-import { StrategiesResponseDto } from './dto/strategy-event.dto';
+import { ActiveAllocationRiskResponseDto, StrategiesResponseDto } from './dto/strategy-event.dto';
 
 @Controller('strategies')
 export class StrategiesController {
@@ -9,5 +9,10 @@ export class StrategiesController {
   @Get()
   async getStrategies(): Promise<StrategiesResponseDto> {
     return this.strategiesService.getStrategies();
+  }
+
+  @Get('active-risk')
+  async getActiveAllocationWithRisk(): Promise<ActiveAllocationRiskResponseDto> {
+    return this.strategiesService.getActiveAllocationWithRisk();
   }
 }

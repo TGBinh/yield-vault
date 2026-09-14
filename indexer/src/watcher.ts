@@ -2,6 +2,8 @@ import { createPublicClient, decodeEventLog as viemDecodeEventLog, http, type Lo
 import { config } from "./config";
 import vaultAbiJson from "./abis/Vault.json";
 import strategyManagerAbiJson from "./abis/StrategyManager.json";
+import rebalanceTimelockAbiJson from "./abis/RebalanceTimelock.json";
+import crossChainTimelockAbiJson from "./abis/CrossChainTimelock.json";
 import {
   blockLag,
   currentBlock as currentBlockGauge,
@@ -10,8 +12,14 @@ import {
   rpcErrorsTotal,
 } from "./metrics";
 import { getCursor, saveCursor } from "./cursor-store";
-import { insertDeposit, insertStrategyEvent, insertWithdrawal } from "./event-repository";
+import {
+  insertDeposit,
+  insertGovernanceEvent,
+  insertStrategyEvent,
+  insertWithdrawal,
+} from "./event-repository";
 import { confirmPendingRows } from "./reorg-confirmer";
+import { getLastSnapshotTimestampMs, insertVaultSnapshot } from "./snapshot-writer";
 
 // Vault Security Audit - Organization: watcher.ts từng là 1 God class 326 dòng gộp 5 trách
 // nhiệm (RPC client, cursor persistence, ABI decoding, 3 writer Postgres, reorg confirmation).
@@ -21,13 +29,34 @@ import { confirmPendingRows } from "./reorg-confirmer";
 
 const vaultAbi = vaultAbiJson as readonly unknown[];
 const strategyManagerAbi = strategyManagerAbiJson as readonly unknown[];
+const rebalanceTimelockAbi = rebalanceTimelockAbiJson as readonly unknown[];
+const crossChainTimelockAbi = crossChainTimelockAbiJson as readonly unknown[];
 
-// Chỉ theo dõi đúng các event được yêu cầu: Vault(Deposit, Withdraw), StrategyManager(StrategyRegistered, ActiveStrategyChanged).
+// Chỉ theo dõi đúng các event được yêu cầu: Vault(Deposit, Withdraw),
+// StrategyManager(StrategyRegistered, ActiveStrategyChanged, AllocationsUpdated).
+// Phase 2 (strategy allocation breakdown) - AllocationsUpdated MỚI thêm: trước đây không
+// index event này nên backend không biết phân bổ % hiện tại đang chạy, chỉ biết "strategy
+// nào từng active" (StrategyRegistered/ActiveStrategyChanged không mang weightBps).
 const VAULT_EVENT_NAMES = ["Deposit", "Withdraw"] as const;
-const STRATEGY_MANAGER_EVENT_NAMES = ["StrategyRegistered", "ActiveStrategyChanged"] as const;
+const STRATEGY_MANAGER_EVENT_NAMES = [
+  "StrategyRegistered",
+  "ActiveStrategyChanged",
+  "AllocationsUpdated",
+] as const;
+// Phase 3 (Governance page).
+const REBALANCE_TIMELOCK_EVENT_NAMES = [
+  "RebalanceQueued",
+  "RebalanceExecuted",
+  "RebalanceCanceled",
+] as const;
+const CROSS_CHAIN_TIMELOCK_EVENT_NAMES = [
+  "TransferQueued",
+  "TransferExecuted",
+  "TransferCanceled",
+] as const;
 
 type WatchedContract = {
-  name: "Vault" | "StrategyManager";
+  name: "Vault" | "StrategyManager" | "RebalanceTimelock" | "CrossChainTimelock";
   address: `0x${string}`;
   abi: readonly unknown[];
   eventNames: readonly string[];
@@ -41,6 +70,28 @@ const watchedContracts: WatchedContract[] = [
     abi: strategyManagerAbi,
     eventNames: STRATEGY_MANAGER_EVENT_NAMES,
   },
+  // Phase 3 (Governance page) - optional, đúng pattern indexer-chain-b của GĐ5: bỏ qua
+  // hoàn toàn nếu chưa cấu hình địa chỉ (vd. testnet chưa deploy tới GĐ6).
+  ...(config.rebalanceTimelockAddress
+    ? [
+        {
+          name: "RebalanceTimelock" as const,
+          address: config.rebalanceTimelockAddress,
+          abi: rebalanceTimelockAbi,
+          eventNames: REBALANCE_TIMELOCK_EVENT_NAMES,
+        },
+      ]
+    : []),
+  ...(config.crossChainTimelockAddress
+    ? [
+        {
+          name: "CrossChainTimelock" as const,
+          address: config.crossChainTimelockAddress,
+          abi: crossChainTimelockAbi,
+          eventNames: CROSS_CHAIN_TIMELOCK_EVENT_NAMES,
+        },
+      ]
+    : []),
 ];
 
 export class Watcher {
@@ -104,8 +155,44 @@ export class Watcher {
     blockLag.set(Number(maxLag));
 
     await confirmPendingRows(this.client, currentBlock);
+    await this.maybeSnapshot(currentBlock);
 
     this.scheduleNextTick();
+  }
+
+  /// Phase 1 (dashboard performance chart) - chụp TVL/share-price định kỳ, đọc TRỰC TIẾP
+  /// on-chain (không cộng dồn deposits/withdrawals) để phản ánh đúng lãi strategy đã
+  /// accru. Tự kiểm tra khoảng cách với mẫu gần nhất TRƯỚC khi gọi RPC - tránh gọi
+  /// totalAssets()/totalSupply() mỗi tick (vốn chạy mỗi vài giây) khi chỉ cần 1 mẫu mỗi
+  /// vài phút.
+  private async maybeSnapshot(currentBlock: bigint): Promise<void> {
+    const lastSnapshotMs = await getLastSnapshotTimestampMs(config.vaultAddress);
+    const now = Date.now();
+    if (lastSnapshotMs !== null && now - lastSnapshotMs < config.snapshotIntervalMs) {
+      return;
+    }
+
+    const [tvl, totalShares] = await Promise.all([
+      this.client.readContract({
+        address: config.vaultAddress,
+        abi: vaultAbi,
+        functionName: "totalAssets",
+      }) as Promise<bigint>,
+      this.client.readContract({
+        address: config.vaultAddress,
+        abi: vaultAbi,
+        functionName: "totalSupply",
+      }) as Promise<bigint>,
+    ]);
+    const blockTimestamp = await this.getBlockTimestamp(currentBlock);
+
+    await insertVaultSnapshot({
+      contractAddress: config.vaultAddress,
+      blockNumber: currentBlock,
+      blockTimestampIso: new Date(Number(blockTimestamp) * 1000).toISOString(),
+      tvl,
+      totalShares,
+    });
   }
 
   private async scanContract(contract: WatchedContract, currentBlock: bigint): Promise<void> {
@@ -223,6 +310,24 @@ export class Watcher {
         payload,
       });
       eventsProcessedTotal.inc({ contract: contract.name, event_name: decoded.eventName });
+      return;
+    }
+
+    // Phase 3 (Governance page) - RebalanceTimelock/CrossChainTimelock đều chỉ mang
+    // `id`/`eta`/thông tin đề xuất trong payload, không có asset/shares nào - dùng chung
+    // 1 nhánh, ghi vào governance_events.
+    if (contract.name === "RebalanceTimelock" || contract.name === "CrossChainTimelock") {
+      const payload = serializeArgs(decoded.args);
+      await insertGovernanceEvent({
+        txHash: log.transactionHash,
+        logIndex: log.logIndex,
+        blockNumber: log.blockNumber,
+        blockTimestampIso,
+        contractAddress: contract.address,
+        eventName: decoded.eventName,
+        payload,
+      });
+      eventsProcessedTotal.inc({ contract: contract.name, event_name: decoded.eventName });
     }
   }
 }
@@ -257,10 +362,24 @@ export function redactUrl(raw: string): string {
   }
 }
 
+/// Phase 2 (strategy allocation breakdown): AllocationsUpdated là event StrategyManager
+/// ĐẦU TIÊN có tham số dạng mảng số nguyên (`uint16[] weightsBps`) - viem decode MỌI kiểu
+/// số nguyên EVM (kể cả uint16) thành `bigint`, kể cả khi nằm trong mảng. `serializeArgs`
+/// trước đây chỉ đổi bigint ở TOP-LEVEL, không đệ quy vào mảng -> `JSON.stringify` sẽ ném
+/// lỗi "Do not know how to serialize a BigInt" ngay khi gặp event này (chưa lộ ra trước
+/// đây vì StrategyRegistered/ActiveStrategyChanged chỉ có tham số address, không có mảng
+/// bigint nào). Đệ quy qua mọi giá trị (kể cả lồng trong mảng) để an toàn với mọi event
+/// tương lai, không chỉ vá riêng AllocationsUpdated.
 function serializeArgs(args: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(args)) {
-    result[key] = typeof value === "bigint" ? value.toString() : value;
+    result[key] = serializeValue(value);
   }
   return result;
+}
+
+function serializeValue(value: unknown): unknown {
+  if (typeof value === "bigint") return value.toString();
+  if (Array.isArray(value)) return value.map(serializeValue);
+  return value;
 }

@@ -66,6 +66,48 @@ CREATE INDEX IF NOT EXISTS idx_strategy_events_chain_block ON strategy_events (c
 CREATE INDEX IF NOT EXISTS idx_strategy_events_name ON strategy_events (event_name);
 CREATE INDEX IF NOT EXISTS idx_strategy_events_confirmed ON strategy_events (confirmed);
 
+-- Phase 3 (Governance page) - RebalanceTimelock/CrossChainTimelock KHÔNG có getter liệt kê
+-- "đang chờ gì" (mapping không enumerable, xem RebalanceTimelock.sol/CrossChainTimelock.sol) -
+-- phải suy ra từ event log. Cùng schema với strategy_events (event_name + payload JSONB),
+-- tách bảng riêng vì đây là 2 loại contract khác hẳn (timelock, không phải strategy).
+CREATE TABLE IF NOT EXISTS governance_events (
+    id BIGSERIAL PRIMARY KEY,
+    chain_id INTEGER NOT NULL,
+    tx_hash TEXT NOT NULL,
+    log_index INTEGER NOT NULL,
+    block_number BIGINT NOT NULL,
+    block_timestamp TIMESTAMPTZ NOT NULL,
+    contract_address TEXT NOT NULL,
+    event_name TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT governance_events_chain_tx_log_unique UNIQUE (chain_id, tx_hash, log_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_governance_events_chain_block ON governance_events (chain_id, block_number);
+CREATE INDEX IF NOT EXISTS idx_governance_events_name ON governance_events (event_name);
+CREATE INDEX IF NOT EXISTS idx_governance_events_confirmed ON governance_events (confirmed);
+
+-- Phase 1 (dashboard performance chart) - snapshot TVL/share-price định kỳ, đọc TRỰC TIẾP
+-- on-chain (Vault.totalAssets()/totalSupply()) tại thời điểm chụp thay vì cộng dồn
+-- deposits/withdrawals - phản ánh đúng lãi đã accru vào strategy, không chỉ dòng tiền vào/ra.
+-- Không có unique constraint theo tx (đây không phải event log, là điểm mẫu định kỳ) -
+-- chống trùng bằng cách watcher tự kiểm tra "đã đủ SNAPSHOT_INTERVAL_MS kể từ mẫu cuối" trước khi insert.
+CREATE TABLE IF NOT EXISTS vault_snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    chain_id INTEGER NOT NULL,
+    contract_address TEXT NOT NULL,
+    block_number BIGINT NOT NULL,
+    block_timestamp TIMESTAMPTZ NOT NULL,
+    tvl NUMERIC(78, 0) NOT NULL,
+    total_shares NUMERIC(78, 0) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_vault_snapshots_chain_contract_time
+    ON vault_snapshots (chain_id, contract_address, block_timestamp);
+
 -- Theo dõi tiến độ quét block theo từng (chain_id, contract_address) để watcher có thể
 -- resume đúng chỗ sau khi restart, tránh bỏ sót hoặc quét trùng.
 CREATE TABLE IF NOT EXISTS indexer_cursors (
