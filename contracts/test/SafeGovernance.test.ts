@@ -1,7 +1,15 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { MockUSDC, MockStrategy, RebalanceTimelock, StrategyManager, Vault } from "../typechain-types";
+import {
+  CrossChainExecutor,
+  CrossChainTimelock,
+  MockUSDC,
+  MockStrategy,
+  RebalanceTimelock,
+  StrategyManager,
+  Vault,
+} from "../typechain-types";
 import { createSafe, deploySafeInfra, execSafeTransaction } from "../scripts/lib/safe";
 
 const ONE_USDC = 10n ** 6n;
@@ -93,6 +101,44 @@ describe("Safe multisig governance (Phase 3)", () => {
     // test này: EXECUTOR_ROLE quên revoke khỏi deployer sẽ để lộ y hệt lỗ hổng ban đầu).
     await strategyManager.grantRole(executorRole, await timelock.getAddress());
 
+    // Vault Security Audit (GD6.2 cross-chain review) - Critical-2: cung 1 quy trinh ban
+    // giao quyen Safe nhu tren, ap dung cho CrossChainExecutor/CrossChainTimelock - day la
+    // 2 contract MOI truoc day BI BO SOT khoi quy trinh nay (deployer EOA giu nguyen
+    // DEFAULT_ADMIN_ROLE), cho phep 1 private key ca nhan setPeer() + tu grant EXECUTOR_ROLE
+    // roi rut sach TVL cross-chain, bo qua hoan toan Timelock 48h va Safe. PHAI wiring +
+    // ban giao xong TRUOC khi revoke quyen deployer o duoi (deployer can con
+    // DEFAULT_ADMIN_ROLE tren StrategyManager de goi setCrossChainExecutor/grantRole).
+    const fakeCcipRouter = ethers.Wallet.createRandom().address;
+    const CrossChainExecutorFactory = await ethers.getContractFactory("CrossChainExecutor");
+    const crossChainExecutor = (await CrossChainExecutorFactory.deploy(
+      deployer.address,
+      fakeCcipRouter,
+      await strategyManager.getAddress(),
+      await usdc.getAddress()
+    )) as unknown as CrossChainExecutor;
+
+    const CrossChainTimelockFactory = await ethers.getContractFactory("CrossChainTimelock");
+    const crossChainTimelock = (await CrossChainTimelockFactory.deploy(
+      deployer.address,
+      safeAddress,
+      await crossChainExecutor.getAddress()
+    )) as unknown as CrossChainTimelock;
+
+    const crossChainRole = await strategyManager.CROSS_CHAIN_ROLE();
+    await strategyManager.grantRole(crossChainRole, await crossChainExecutor.getAddress());
+    await strategyManager.setCrossChainExecutor(await crossChainExecutor.getAddress());
+
+    const ccExecutorRole = await crossChainExecutor.EXECUTOR_ROLE();
+    await crossChainExecutor.grantRole(ccExecutorRole, await crossChainTimelock.getAddress());
+
+    const ccExecutorAdminRole = await crossChainExecutor.DEFAULT_ADMIN_ROLE();
+    await crossChainExecutor.grantRole(ccExecutorAdminRole, safeAddress);
+    await crossChainExecutor.revokeRole(ccExecutorAdminRole, deployer.address);
+
+    const ccTimelockAdminRole = await crossChainTimelock.DEFAULT_ADMIN_ROLE();
+    await crossChainTimelock.grantRole(ccTimelockAdminRole, safeAddress);
+    await crossChainTimelock.revokeRole(ccTimelockAdminRole, deployer.address);
+
     await vault.revokeRole(guardianRole, deployer.address);
     await vault.revokeRole(defaultAdminRole, deployer.address);
     await strategyManager.revokeRole(strategistRole, deployer.address);
@@ -116,6 +162,8 @@ describe("Safe multisig governance (Phase 3)", () => {
       strategyB,
       safe,
       timelock,
+      crossChainExecutor,
+      crossChainTimelock,
     };
   }
 

@@ -73,7 +73,15 @@ async function main() {
   // phải qua queueRebalance() -> chờ MIN_DELAY -> executeRebalance() (permissionless).
   // Trên production, GOVERNANCE_MULTISIG_ADDRESS phải là địa chỉ Safe thật, không phải
   // 1 EOA - nếu không set, mặc định dùng chính deployer (CHỈ chấp nhận được cho local/dev).
-  const proposerAddress = process.env.GOVERNANCE_MULTISIG_ADDRESS ?? deployer.address;
+  //
+  // Bug thật đã gặp: dùng `??` thay vì `||` khiến 1 dòng "GOVERNANCE_MULTISIG_ADDRESS="
+  // (khai báo nhưng để trống, đúng như .env.example) không rơi về mặc định như mong đợi -
+  // dotenv đọc ra chuỗi rỗng "" (không phải undefined/null), mà `??` chỉ coi undefined/null
+  // là "chưa có giá trị". Chuỗi rỗng "" bị truyền thẳng làm địa chỉ proposer, ethers không
+  // nhận ra là địa chỉ hợp lệ nên thử phân giải như tên ENS, rồi crash với
+  // NotImplementedError trên mạng Hardhat local (không hỗ trợ ENS). Dùng `||` để coi CẢ
+  // chuỗi rỗng lẫn undefined/null là "chưa set".
+  const proposerAddress = process.env.GOVERNANCE_MULTISIG_ADDRESS || deployer.address;
   const RebalanceTimelockFactory = await ethers.getContractFactory("RebalanceTimelock");
   const timelock = await RebalanceTimelockFactory.deploy(
     deployer.address,
@@ -137,12 +145,29 @@ async function main() {
   let crossChainTimelockAddress: string | undefined;
 
   if (ccipRouterAddress) {
+    // Vault Security Audit (GD6.2 review) - Low-4: truoc day luon dung chinh MockUSDC vua
+    // deploy o tren lam asset cho CrossChainExecutor - nhung MockUSDC khong co CCIP
+    // TokenPool nao ca, moi ccipSend() se revert UnsupportedToken tren network THAT. Cho
+    // phep override qua CCIP_ASSET_ADDRESS (vd. dia chi CCIP-BnM tren testnet, hoac USDC
+    // that qua CCTP/token pool chinh thuc tren mainnet) - khong set = giu hanh vi cu (dung
+    // MockUSDC, CHI hop le cho local/hardhat mo phong qua CCIPLocalSimulator, KHONG dung
+    // duoc voi router that).
+    // Cùng lớp bug với proposerAddress ở trên - dùng `||` thay vì `??` để chuỗi rỗng "" (từ
+    // 1 dòng CCIP_ASSET_ADDRESS= để trống trong .env) cũng rơi về mặc định đúng như mong đợi.
+    const ccipAssetAddress = process.env.CCIP_ASSET_ADDRESS || (await usdc.getAddress());
+    if (!process.env.CCIP_ASSET_ADDRESS) {
+      console.log(
+        "WARNING: CCIP_ASSET_ADDRESS not set - defaulting to MockUSDC, which has NO real CCIP TokenPool. " +
+          "ccipSend() will revert on any real CCIP router. Set CCIP_ASSET_ADDRESS for a real deployment."
+      );
+    }
+
     const CrossChainExecutorFactory = await ethers.getContractFactory("CrossChainExecutor");
     const executor = await CrossChainExecutorFactory.deploy(
       deployer.address,
       ccipRouterAddress,
       await strategyManager.getAddress(),
-      await usdc.getAddress()
+      ccipAssetAddress
     );
     await executor.waitForDeployment();
     crossChainExecutorAddress = await executor.getAddress();
@@ -151,6 +176,13 @@ async function main() {
     const crossChainRole = await strategyManager.CROSS_CHAIN_ROLE();
     await (await strategyManager.grantRole(crossChainRole, crossChainExecutorAddress)).wait();
     console.log("CROSS_CHAIN_ROLE granted to CrossChainExecutor.");
+
+    // Vault Security Audit (GD6.2 review) - Critical-1 fix: StrategyManager.totalAssets()
+    // phai biet doc lai gia tri "dang gui remote" tu CrossChainExecutor, neu khong gia
+    // share se sut ngay khi initiateTransfer() rut von di (xem StrategyManager.sol +
+    // ICrossChainAccounting.sol).
+    await (await strategyManager.setCrossChainExecutor(crossChainExecutorAddress)).wait();
+    console.log("StrategyManager.crossChainExecutor set - totalAssets() now accounts for in-flight cross-chain funds.");
 
     const CrossChainTimelockFactory = await ethers.getContractFactory("CrossChainTimelock");
     const crossChainTimelock = await CrossChainTimelockFactory.deploy(
@@ -165,6 +197,32 @@ async function main() {
     const executorRoleOnCrossChain = await executor.EXECUTOR_ROLE();
     await (await executor.grantRole(executorRoleOnCrossChain, crossChainTimelockAddress)).wait();
     console.log("EXECUTOR_ROLE (CrossChainExecutor) granted to CrossChainTimelock.");
+
+    // Vault Security Audit (GD6.2 review) - Critical-2 fix: truoc day deployer EOA giu
+    // nguyen DEFAULT_ADMIN_ROLE tren CA 2 contract nay (khong nam trong quy trinh ban giao
+    // cho Safe da ap dung cho Vault/StrategyManager - xem SafeGovernance.test.ts) - 1
+    // private key ca nhan bi lo la du de setPeer() toi 1 dia chi tuy y + tu grant
+    // EXECUTOR_ROLE cho chinh no + rut sach TVL cross-chain, bo qua hoan toan Timelock 48h
+    // va Safe. Ap dung dung quy trinh da chuan hoa: grant cho Safe truoc, revoke khoi
+    // deployer sau - chi khi proposerAddress la 1 dia chi Safe that (khac deployer); giu
+    // nguyen quyen deployer trong moi truong dev/local (GOVERNANCE_MULTISIG_ADDRESS chua
+    // set) de khong tu khoa chinh minh giua chung script.
+    if (proposerAddress.toLowerCase() !== deployer.address.toLowerCase()) {
+      const executorAdminRole = await executor.DEFAULT_ADMIN_ROLE();
+      await (await executor.grantRole(executorAdminRole, proposerAddress)).wait();
+      await (await executor.revokeRole(executorAdminRole, deployer.address)).wait();
+      console.log("CrossChainExecutor.DEFAULT_ADMIN_ROLE transferred to Safe and revoked from deployer.");
+
+      const timelockAdminRole = await crossChainTimelock.DEFAULT_ADMIN_ROLE();
+      await (await crossChainTimelock.grantRole(timelockAdminRole, proposerAddress)).wait();
+      await (await crossChainTimelock.revokeRole(timelockAdminRole, deployer.address)).wait();
+      console.log("CrossChainTimelock.DEFAULT_ADMIN_ROLE transferred to Safe and revoked from deployer.");
+    } else {
+      console.log(
+        "GOVERNANCE_MULTISIG_ADDRESS not set - deployer keeps DEFAULT_ADMIN_ROLE on " +
+          "CrossChainExecutor/CrossChainTimelock (dev/local only, NOT safe for a funded deployment)."
+      );
+    }
 
     // Peer whitelist (setPeer) KHONG lam o day - can dia chi CrossChainExecutor cua chain
     // KIA, chi biet duoc SAU KHI da deploy ca 2 chain. Xem PLAN.md GD6 §4/§9: buoc noi cap

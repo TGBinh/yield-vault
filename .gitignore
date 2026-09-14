@@ -52,3 +52,5 @@ Thumbs.db
 # files are kept - only these specific internal docs are excluded)
 /PLAN.md
 /v0-prompt.md
+
+scratchpad/

@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IStrategy} from "./interfaces/IStrategy.sol";
 import {IStrategyManager} from "./interfaces/IStrategyManager.sol";
+import {ICrossChainAccounting} from "./interfaces/ICrossChainAccounting.sol";
 
 /// @notice Giai đoạn 3 — quản lý NHIỀU strategy active đồng thời, phân bổ theo trọng số
 /// (basis points). Vault chỉ nói chuyện với StrategyManager, không bao giờ gọi thẳng
@@ -45,6 +46,7 @@ contract StrategyManager is IStrategyManager, AccessControl {
     error LengthMismatch();
     error WeightSumMismatch();
     error ZeroAddress();
+    error CrossChainExecutorAlreadySet();
 
     IERC20 public immutable assetToken;
     address public immutable vault;
@@ -55,8 +57,18 @@ contract StrategyManager is IStrategyManager, AccessControl {
     address[] public activeStrategies;
     mapping(address => uint16) public weightBps;
 
+    /// @notice Vault Security Audit (GD6.2 cross-chain review) - Critical-1 fix: dia chi
+    /// CrossChainExecutor cua CHINH chain nay, dung de totalAssets() cong them gia tri
+    /// dang "gui remote" o chain khac (xem ICrossChainAccounting.sol). address(0) = tinh
+    /// nang cross-chain chua duoc bat (mac dinh, tuong thich nguoc hoan toan voi moi
+    /// deployment truoc GD6.2). Set-once qua setCrossChainExecutor() - khong cho phep doi
+    /// lai sau khi da set, tranh 1 admin doc hai tro totalAssets() ve 1 contract gia mao
+    /// bao cao so du remote sai.
+    address public crossChainExecutor;
+
     event StrategyRegistered(address indexed strategy);
     event AllocationsUpdated(address[] strategies, uint16[] weightsBps);
+    event CrossChainExecutorSet(address indexed executor);
 
     constructor(address _asset, address _vault, address admin) {
         if (_asset == address(0) || _vault == address(0)) revert ZeroAddress();
@@ -74,6 +86,18 @@ contract StrategyManager is IStrategyManager, AccessControl {
     modifier onlyVault() {
         if (msg.sender != vault) revert OnlyVault();
         _;
+    }
+
+    /// @notice GD6 Milestone 6.2 - Vault Security Audit Critical-1 fix: neu chain nay co
+    /// tham gia cross-chain, admin PHAI goi ham nay 1 lan sau khi deploy CrossChainExecutor
+    /// (xem scripts/deploy.ts) de totalAssets() biet cong them gia tri dang gui remote.
+    /// Set-once (khong cho doi lai) - deployment khong dung cross-chain khong bao gio can
+    /// goi ham nay, totalAssets() hoat dong y het truoc GD6.2.
+    function setCrossChainExecutor(address _executor) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (crossChainExecutor != address(0)) revert CrossChainExecutorAlreadySet();
+        if (_executor == address(0)) revert ZeroAddress();
+        crossChainExecutor = _executor;
+        emit CrossChainExecutorSet(_executor);
     }
 
     /// @notice Đăng ký 1 strategy mới (chưa active). Phải đăng ký trước khi có thể đưa
@@ -237,9 +261,19 @@ contract StrategyManager is IStrategyManager, AccessControl {
         if (remaining > 0) revert InsufficientLiquidity();
     }
 
-    /// @notice Tổng giá trị quản lý: idle balance + tổng của mọi strategy active. Bọc
-    /// try/catch để 1 strategy lỗi không làm sập luôn view này (Vault.totalAssets() gọi
-    /// hàm này liên tục để tính share price).
+    /// @notice Tổng giá trị quản lý: idle balance + tổng của mọi strategy active + (nếu
+    /// có cross-chain) giá trị đang gửi remote. Bọc try/catch để 1 strategy lỗi không làm
+    /// sập luôn view này (Vault.totalAssets() gọi hàm này liên tục để tính share price).
+    ///
+    /// Vault Security Audit (GD6.2 cross-chain review) - Critical-1 fix: TRƯỚC ĐÂY, gọi
+    /// `withdrawToExecutor` (CrossChainExecutor rút vốn để gửi sang chain khác) làm giảm
+    /// số này NGAY LẬP TỨC mà không có gì bù lại - vốn "biến mất" khỏi kế toán của chính
+    /// depositor sở hữu nó, trong khi depositor ở chain đích lại được hưởng free số vốn đó
+    /// (totalAssets() của HỌ tăng dù không ai deposit thêm). Cộng thêm
+    /// `ICrossChainAccounting(crossChainExecutor).totalRemoteAssets()` giữ giá share ổn
+    /// định đúng suốt vòng đời chuyển tiền: giảm ở strategy nội bộ, tăng ở remoteAssets,
+    /// tổng không đổi - cho tới khi tiền thật sự quay về (`depositFromExecutor` qua message
+    /// RETURN) thì remoteAssets giảm đúng bằng phần đã cộng lại vào strategy nội bộ.
     function totalAssets() external view returns (uint256) {
         uint256 total = assetToken.balanceOf(address(this));
         uint256 len = activeStrategies.length;
@@ -247,6 +281,9 @@ contract StrategyManager is IStrategyManager, AccessControl {
             try IStrategy(activeStrategies[i]).totalAssets() returns (uint256 a) {
                 total += a;
             } catch {}
+        }
+        if (crossChainExecutor != address(0)) {
+            total += ICrossChainAccounting(crossChainExecutor).totalRemoteAssets();
         }
         return total;
     }
