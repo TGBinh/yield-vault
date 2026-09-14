@@ -18,7 +18,14 @@ export const hardhatLocal = defineChain({
 
 export const wagmiConfig = createConfig({
   chains: [hardhatLocal],
-  connectors: [injected()],
+  // Khi máy có nhiều ví extension cùng lúc (vd. Phantom + MetaMask), connector
+  // `injected()` chung chung không phân biệt được nên tuỳ trình duyệt/thứ tự cài mà bắt
+  // nhầm ví - Phantom hỗ trợ EVM chưa ổn định (đặc biệt với mạng custom như Hardhat local)
+  // và có thể throw lỗi mơ hồ ("Unexpected error" tại evmAsk.js selectExtension) thay vì
+  // hiện popup kết nối bình thường. Đăng ký RÕ RÀNG connector nhắm đúng MetaMask trước
+  // (id "metaMask"), giữ lại `injected()` chung làm phương án dự phòng nếu máy không có
+  // MetaMask - xem connect-wallet.tsx ưu tiên chọn connector theo đúng thứ tự này.
+  connectors: [injected({ target: "metaMask" }), injected()],
   transports: {
     [hardhatLocal.id]: http(deployments.rpcUrl),
   },

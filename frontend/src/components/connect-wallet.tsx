@@ -15,7 +15,13 @@ export function ConnectWallet() {
   const { disconnect } = useDisconnect();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
 
-  const injectedConnector = connectors.find((c) => c.id === "injected") ?? connectors[0];
+  // Ưu tiên connector nhắm đúng MetaMask (id "metaMask") trước connector "injected" chung
+  // chung - tránh bắt nhầm ví khác (vd. Phantom) khi máy cài nhiều ví extension cùng lúc,
+  // xem lib/wagmi.ts.
+  const injectedConnector =
+    connectors.find((c) => c.id === "metaMask") ??
+    connectors.find((c) => c.id === "injected") ??
+    connectors[0];
   const wrongNetwork = isConnected && chainId !== EXPECTED_CHAIN_ID;
 
   if (!isConnected) {
